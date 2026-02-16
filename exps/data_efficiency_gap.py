@@ -10,13 +10,10 @@ import sys
 import argparse
 import json
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, project_root)
-
-from asim_minigrid.src.models import WorldModel, SparseIDM
-from asim_minigrid.src.dataset import MiniGridDynamicsDataset, NormalizedDataset
-from evaluate_generation import MiniGridPhysicsOracle
-from asim_minigrid.scripts.utils import (
+from asim_minigrid.models import WorldModel, SparseIDM
+from asim_minigrid.dataset import MiniGridDynamicsDataset, NormalizedDataset
+from asim_minigrid.evaluate_generation import MiniGridPhysicsOracle
+from asim_minigrid.utils import (
     freeze_model_for_active_learning,
     train_world_model,
     train_inverse_model,
@@ -24,7 +21,7 @@ from asim_minigrid.scripts.utils import (
     test_inverse_model,
     set_all_seeds
 )
-from asim_minigrid.scripts.config import DATA_EFFICIENCY_GAP, DEVICE
+from asim_minigrid.config import DATA_EFFICIENCY_GAP, DEVICE
 
 # Configuration
 DATA_PATH = DATA_EFFICIENCY_GAP["DATA_PATH"]

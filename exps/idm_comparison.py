@@ -7,13 +7,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
-# Add project root to path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, project_root)
-
-from asim_minigrid.src.models import DenseIDM, SparseIDM
-from asim_minigrid.src.dataset import NormalizedDataset, MiniGridDynamicsDataset
-from asim_minigrid.scripts.config import IDM_COMPARISON, DEVICE
+from asim_minigrid.models import DenseIDM, SparseIDM
+from asim_minigrid.dataset import NormalizedDataset, MiniGridDynamicsDataset
+from asim_minigrid.config import IDM_COMPARISON, DEVICE
 
 # Configuration
 TRAIN_DATA_PATH = IDM_COMPARISON["TRAIN_DATA_PATH"]

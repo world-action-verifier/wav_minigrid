@@ -9,10 +9,10 @@ import sys
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, project_root)
 
-from asim_minigrid.src.models import WorldModel, SparseIDM
-from asim_minigrid.src.dataset import MiniGridDynamicsDataset, PseudoLabeledSubset, NormalizedDataset, MemoryDynamicsDataset
-from asim_minigrid.scripts.utils import freeze_model_for_active_learning
-from asim_minigrid.scripts.al_utils import (
+from asim_minigrid.models import WorldModel, SparseIDM
+from asim_minigrid.dataset import MiniGridDynamicsDataset, PseudoLabeledSubset, NormalizedDataset, MemoryDynamicsDataset
+from asim_minigrid.utils import freeze_model_for_active_learning
+from asim_minigrid.al_utils import (
     set_all_seeds,
     query_strategy,
     compute_uncertainty_via_mcdropout,
@@ -20,7 +20,7 @@ from asim_minigrid.scripts.al_utils import (
     evaluate,
     train_one_round,
 )
-from asim_minigrid.scripts.config import WM_ACTIVE_LEARNING, DEVICE
+from asim_minigrid.config import WM_ACTIVE_LEARNING, DEVICE
 
 # Configuration
 DATA_PATH = WM_ACTIVE_LEARNING["DATA_PATH"]

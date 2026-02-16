@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from asim_minigrid.src.dataset import MiniGridDynamicsDataset, NormalizedDataset
+from asim_minigrid.dataset import MiniGridDynamicsDataset, NormalizedDataset
 from torch.utils.data import DataLoader, Subset, Dataset
 
 def compute_loss_vp(pred_out, inputs, criterion_ce_none, criterion_mse,

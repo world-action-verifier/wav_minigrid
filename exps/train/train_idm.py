@@ -16,9 +16,9 @@ from tqdm import tqdm
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.insert(0, project_root)
 
-from asim_minigrid.src.models import SparseIDM
-from asim_minigrid.scripts.train.config import DEVICE, IDM_TRAINING
-from asim_minigrid.scripts.train.train_utils import (
+from asim_minigrid.models import SparseIDM
+from config import DEVICE, IDM_TRAINING
+from train_utils import (
     set_all_seeds,
     get_dataloaders_with_validation,
     evaluate_idm,

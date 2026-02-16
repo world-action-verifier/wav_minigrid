@@ -60,11 +60,12 @@ conda create -n asim_minigrid python=3.7
 conda activate asim_minigrid
 
 # clone repository
-git clone git@github.com:weifeng2829/asim-minigrid.git
-cd asim-minigrid
+git clone https://github.com/Weifeng2829/ASIM-MiniGrid.git
+cd ASIM-MiniGrid
 
 # install dependencies
 pip install -r requirements.txt
+pip install -e .
 ```
 ## 🎮 MiniGrid Tasks 
 
@@ -114,8 +115,7 @@ For reference, we also include the code for data collection and model training:
 Evaluate the robustness of Sparse IDM compared to vanilla IDM under distribution shifts.
 
 ```bash
-cd src/minigrid/scripts
-python idm_comparison.py
+python exps/idm_comparison.py
 ```
 
 **This experiment evaluates:**
@@ -130,7 +130,7 @@ python idm_comparison.py
 Compare data efficiency between Sparse IDM and a forward world model.
 
 ```bash
-python data_efficiency_gap.py
+python exps/data_efficiency_gap.py
 ```
 
 **This experiment evaluates:**
@@ -145,7 +145,7 @@ python data_efficiency_gap.py
 Test model robustness as the environment state complexity increases.
 
 ```bash
-python state_complexity_gap.py
+python exps/state_complexity_gap.py
 ```
 
 **This experiment evaluates:**
@@ -160,7 +160,7 @@ python state_complexity_gap.py
 Compare acquisition strategies for improving world model performance.
 
 ```bash
-python wm_active_learning.py
+python exps/wm_active_learning.py
 ```
 
 **This experiment evaluates:**
@@ -187,19 +187,24 @@ Key Findings:
 ## 📂 Project Structure
 
 ```
-minigrid/
+ASIM-MiniGrid/
 ├── README.md
 ├── assets
 ├── checkpoints
 ├── data
 ├── env
+│   ├── data_collection
+├── exps
+│   ├── data_efficiency_gap.py
+│   ├── idm_comparison.py
+│   ├── state_complexity_gap.py
+│   ├── wm_active_learning.py
+│   ├── train
 ├── requirements.txt
-├── scripts
+├── setup.py
 └── src
-    ├── dataset.py
-    └── models
-        ├── idm.py
-        └── wm.py
+    ├── asim_minigrid
+    │   ├── models
 ```
 
 ---

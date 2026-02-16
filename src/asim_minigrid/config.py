@@ -8,7 +8,8 @@ import torch
 
 # Common paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MINIGRID_DIR = os.path.dirname(SCRIPT_DIR)
+# config.py is in src/asim_minigrid/, so go up two levels to reach project root
+MINIGRID_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ============================================================================
@@ -113,7 +114,11 @@ WM_ACTIVE_LEARNING = {
         "checkpoints", 
         "pretrained_base_world_model.pth" # initialized from the Pre-trained Video Model; trained from the random selected data
     ),
-    "INVERSE_MODEL_PATH": "pretrained_inverse_model_for_active_learning.pth", # trained from the random selected data
+    "INVERSE_MODEL_PATH": os.path.join(
+        MINIGRID_DIR, 
+        "checkpoints", 
+        "pretrained_inverse_model_for_active_learning.pth"
+    ), # trained from the random selected data
     "VIDEO_STAGE1_CKPT": os.path.join(
         MINIGRID_DIR, 
         "checkpoints", 

@@ -11,8 +11,8 @@ import wandb
 import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
-from asim_minigrid.src.models.wm import WorldModel
-from asim_minigrid.scripts.train.train_utils import (
+from asim_minigrid.models.wm import WorldModel
+from train_utils import (
     compute_loss_vp, 
     evaluate, 
     get_dataloaders,
@@ -20,7 +20,7 @@ from asim_minigrid.scripts.train.train_utils import (
     load_model_checkpoint,
     create_warmup_cosine_scheduler,
 )
-from asim_minigrid.scripts.train.config import DEVICE, VIDEO_TRAINING
+from config import DEVICE, VIDEO_TRAINING
 
 print(f"Using device: {DEVICE}")
 

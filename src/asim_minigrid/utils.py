@@ -263,9 +263,20 @@ def test_world_model(model, test_loader, forward_carried_loss_weight=10.0, devic
             gt_next_carried_obj = inputs['carried_obj'][1]
             
             # Compute dynamics mask
-            diff_map = torch.abs(prev_frame - gt_next_frame.float()).sum(dim=-1)
-            diff_mask = (diff_map > 0.01)  # [B, H, W]
+            curr_frame_f = prev_frame.float()
+            next_frame_gt_f = gt_next_frame.float()
+            diff_map = torch.abs(curr_frame_f - next_frame_gt_f).sum(dim=-1)
+            raw_diff_mask = (diff_map > 0.01)
             
+            # Filter background noise
+            curr_type = prev_frame[..., 0] 
+            next_type = gt_next_frame[..., 0]
+            
+            FLOOR_IDX = 3 
+            
+            is_noise_floor = (curr_type == FLOOR_IDX) & (next_type == FLOOR_IDX)
+            
+            diff_mask = raw_diff_mask & (~is_noise_floor)
             # Check if carried state changed
             carried_col_changed = (prev_carried_col != gt_next_carried_col).squeeze(-1)
             carried_obj_changed = (prev_carried_obj != gt_next_carried_obj).squeeze(-1)
@@ -397,8 +408,17 @@ def test_inverse_model(inverse_model, oracle, test_loader, device=None):
             curr_frame_f = curr_frame.float()
             next_frame_gt_f = next_frame_gt.float()
             diff_map = torch.abs(curr_frame_f - next_frame_gt_f).sum(dim=-1)
-            diff_mask = (diff_map > 0.01)
+            raw_diff_mask = (diff_map > 0.01)
             
+            # Filter background noise
+            curr_type = curr_frame[..., 0] 
+            next_type = next_frame_gt[..., 0]
+            
+            FLOOR_IDX = 3 
+            
+            is_noise_floor = (curr_type == FLOOR_IDX) & (next_type == FLOOR_IDX)
+            
+            diff_mask = raw_diff_mask & (~is_noise_floor)
             # Check carried state changes
             carried_col_changed = (curr_c_col != next_c_col_gt).squeeze(-1)
             carried_obj_changed = (curr_c_obj != next_c_obj_gt).squeeze(-1)

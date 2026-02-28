@@ -39,26 +39,26 @@ def load_pretrained_world_model(model_path, obs_shape, num_actions):
     return model
 
 def run_noise_experiment(exp_cfg, skip_world_model=False, skip_inverse_model=False):
-    """运行特定噪声等级的实验"""
+    """Conduct experiments at specific noise levels"""
     print(f"\n{'#'*80}")
     print(f" Running Experiment: {exp_cfg['name']} ")
     print(f"{'#'*80}")
     
     set_all_seeds(SEED)
     
-    # 1. 加载数据集
+    # Load dataset
     print(f"Loading Train: {exp_cfg['train']}")
     train_dataset = NormalizedDataset(MiniGridDynamicsDataset(exp_cfg['train']))
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     print(f"Loading Test: {exp_cfg['test']}")
-    test_dataset = MiniGridDynamicsDataset(exp_cfg['test']) # 测试集通常不需要增强
+    test_dataset = MiniGridDynamicsDataset(exp_cfg['test'])  
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
     
     obs_shape = test_dataset.states.shape[1:]
     num_actions = 7
     
-    # 2. 训练 World Model
+    # Train World Model
     world_model_results = {'dyn_acc': 0.0}
     if not skip_world_model:
         print("\n--- [World Model] Training ---")
@@ -83,7 +83,7 @@ def run_noise_experiment(exp_cfg, skip_world_model=False, skip_inverse_model=Fal
     else:
         world_model_results = {'dyn_acc': 0.0}
     
-    # 3. 训练 Inverse Model
+    # Train Inverse Model
     if not skip_inverse_model:
         print("\n--- [Inverse Model] Training ---")
         inverse_model = train_inverse_model(
@@ -134,7 +134,7 @@ def main():
     results_list = []
     
     for exp_cfg in NOISE_EXPERIMENTS:
-        # 检查文件是否存在
+        # Check if files exist
         if not os.path.exists(exp_cfg['train']) or not os.path.exists(exp_cfg['test']):
             print(f"Warning: Skipping {exp_cfg['name']} because files were not found.")
             continue

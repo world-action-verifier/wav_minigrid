@@ -10,11 +10,10 @@ import sys
 import argparse
 import json
 
-from asim_minigrid.models import WorldModel, SparseIDM
+from asim_minigrid.models import WorldModel, SparseIDM, DenseIDM
 from asim_minigrid.dataset import MiniGridDynamicsDataset, NormalizedDataset
 from asim_minigrid.evaluate_generation import MiniGridPhysicsOracle
 from asim_minigrid.utils import (
-    freeze_model_for_active_learning,
     train_world_model,
     train_inverse_model,
     test_world_model,
@@ -46,7 +45,7 @@ def load_pretrained_world_model(model_path, obs_shape, num_actions):
     print("Pretrained model loaded successfully")
     return model
 
-def run_experiment(train_ratio, train_dataset, test_loader, obs_shape, num_actions, skip_world_model=False):
+def run_experiment(train_ratio, train_dataset, test_loader, obs_shape, num_actions, skip_world_model=False, skip_inverse_model=False):
     """Run one experiment with given training data ratio."""
     print(f"\n{'='*80}")
     print(f"Experiment: Training data ratio = {train_ratio*100:.0f}%")
@@ -71,46 +70,42 @@ def run_experiment(train_ratio, train_dataset, test_loader, obs_shape, num_actio
             epochs=EPOCHS,
             lr=LR,
             device=DEVICE,
-            freeze_func=freeze_model_for_active_learning,
+            freeze_func=None,
             forward_carried_loss_weight=FORWARD_CARRIED_LOSS_WEIGHT
         )
-    else:
-        print("\n--- Skipping World Model training and testing, only training Inverse Model ---")
-        world_model = None
-    
-    print("\n--- Training Inverse Model ---")
-    inverse_model = train_inverse_model(
-        train_loader,
-        num_actions,
-        epochs=INVERSE_MODEL_EPOCHS,
-        lr=LR,
-        device=DEVICE,
-        model_class=SparseIDM,
-    )
-    
-    if not skip_world_model:
         print("\n--- Testing World Model ---")
         world_model.eval()
         world_model_results = test_world_model(
             world_model,
             test_loader,
-            forward_carried_loss_weight=FORWARD_CARRIED_LOSS_WEIGHT,
             device=DEVICE
         )
     else:
-        world_model_results = {
-            'dyn_acc': 0.0,
-        }
+        print("\n--- Skipping World Model (training and testing) ---")
+        world_model_results = {'dyn_acc': 0.0}
     
-    print("\n--- Testing Inverse Model ---")
-    inverse_model.eval()
-    oracle = MiniGridPhysicsOracle()
-    inverse_model_results = test_inverse_model(
-        inverse_model,
-        oracle,
-        test_loader,
-        device=DEVICE
-    )
+    if not skip_inverse_model:
+        print("\n--- Training Inverse Model ---")
+        inverse_model = train_inverse_model(
+            train_loader,
+            num_actions,
+            epochs=INVERSE_MODEL_EPOCHS,
+            lr=LR,
+            device=DEVICE,
+            model_class=SparseIDM,
+        )
+        print("\n--- Testing Inverse Model ---")
+        inverse_model.eval()
+        oracle = MiniGridPhysicsOracle()
+        inverse_model_results = test_inverse_model(
+            inverse_model,
+            oracle,
+            test_loader,
+            device=DEVICE
+        )
+    else:
+        print("\n--- Skipping Inverse Model (training and testing) ---")
+        inverse_model_results = {'dyn_accuracy': 0.0}
     
     result = {
         'train_ratio': train_ratio,
@@ -214,8 +209,7 @@ def main():
             train_dataset_full,
             test_loader,
             obs_shape,
-            num_actions,
-            skip_world_model=args.skip_world_model,
+            num_actions
         )
         results_list.append(result)
     

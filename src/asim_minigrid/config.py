@@ -8,7 +8,6 @@ import torch
 
 # Common paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# config.py is in src/asim_minigrid/, so go up two levels to reach project root
 MINIGRID_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -19,16 +18,16 @@ IDM_COMPARISON = {
     "TRAIN_DATA_PATH": os.path.join(
         MINIGRID_DIR, 
         "data", 
-        "MiniGrid-Empty-Interact-6x6-o3-train-v0_MultiTaskPolicy_policy_OOD_train_set.npz"
+        "MiniGrid-Empty-Interact-6x6-o6-3-noise-v0_train_few_sample.npz"
     ),
     "TEST_DATA_PATH": os.path.join(
         MINIGRID_DIR, 
         "data", 
-        "MiniGrid-Empty-Interact-6x6-o3-test-v0_MultiTaskPolicy_policy_OOD_test_set.npz"
+        "MiniGrid-Empty-Interact-6x6-o6-3-noise-v0_test_few_sample.npz"
     ),
     "BATCH_SIZE": 64,
-    "LR": 1e-4,
-    "EPOCHS": 100,
+    "LR": 1e-3,
+    "EPOCHS": 500,
     "NUM_ACTIONS": 7,
     "SEED": 42,
 }
@@ -53,13 +52,13 @@ DATA_EFFICIENCY_GAP = {
         "pretrained_video_model.pth"
     ),
     "BATCH_SIZE": 64,
-    "LR": 1e-4,
-    "EPOCHS": 300,
+    "LR": 1e-3,
+    "EPOCHS": 200,
     "INVERSE_MODEL_EPOCHS": 300,
     "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
     "TARGET_PIXELS": 4.0,
     "MASK_L1_LAMBDA": 0.1,
-    "ADDED": 400 / 5000,
+    "ADDED": 400 / 2000,
     "TRAIN_RATIOS": None,  # Will be computed as [ADDED*1, ADDED*2, ADDED*3, ADDED*4, ADDED*5]
     "SEED": 42,
 }
@@ -93,6 +92,91 @@ STATE_COMPLEXITY_GAP = {
     ),
     "DEFAULT_BATCH_SIZE": 64,
     "DEFAULT_FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
+}
+
+# ============================================================================
+# Noise Robustness Experiment Configuration
+# ============================================================================
+NOISE_ROBUSTNESS = {
+    "EXPERIMENTS": [
+        {
+            "name": "No Noise",
+            "train": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-v0_train.npz",
+            ),
+            "test": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-v0_test.npz",
+            ),
+        },
+        {
+            "name": "Noise-1",
+            "train": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-1-noise-v0_train.npz",
+            ),
+            "test": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-v0_test.npz",
+            ),
+        },
+        {
+            "name": "Noise-2",
+            "train": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-2-noise-v0_train.npz",
+            ),
+            "test": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-v0_test.npz",
+            ),
+        },
+        {
+            "name": "Noise-3",
+            "train": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-3-noise-v0_train.npz",
+            ),
+            "test": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-v0_test.npz",
+            ),
+        },
+        {
+            "name": "Noise-4",
+            "train": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-4-noise-v0_train.npz",
+            ),
+            "test": os.path.join(
+                MINIGRID_DIR,
+                "data",
+                "MiniGrid-Empty-Interact-6x6-o6-v0_test.npz",
+            ),
+        },
+    ],
+    "SAVE_MODEL": False,
+    "VIDEO_STAGE1_CKPT": os.path.join(
+        MINIGRID_DIR, 
+        "checkpoints", 
+        "pretrained_video_model.pth"
+    ),
+    "BATCH_SIZE": 64,
+    "LR": 1e-3,
+    "EPOCHS": 300,
+    "INVERSE_MODEL_EPOCHS": 300,
+    "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
+    "SEED": 42,
 }
 
 # ============================================================================

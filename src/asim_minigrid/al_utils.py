@@ -8,6 +8,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
+from asim_minigrid.evaluate_generation import MiniGridPhysicsOracle
+from asim_minigrid.models import SparseIDM
 
 
 def set_all_seeds(seed: int) -> None:
@@ -385,7 +387,6 @@ def select_and_collect_consistency_data(
 
     # Local import to keep this module lightweight.
     if data_mode == "oracle":
-        from evaluate_generation import MiniGridPhysicsOracle
         oracle = MiniGridPhysicsOracle()
     else:
         oracle = None
@@ -436,8 +437,15 @@ def select_and_collect_consistency_data(
                 'carried_col': torch.stack([c_col, s_gen_c_col], dim=0),
                 'carried_obj': torch.stack([c_obj, s_gen_c_obj], dim=0),
             }
-            output = inverse_model(inv_inputs)
-            act_logits = output[0] if isinstance(output, tuple) else output
+            if isinstance(inverse_model, SparseIDM):
+                output, _, _ = inverse_model(inv_inputs)
+            else:
+                output = inverse_model(inv_inputs)
+
+            if isinstance(output, tuple):
+                act_logits = output[0]
+            else:
+                act_logits = output
             pred_actions = torch.argmax(act_logits, dim=1) 
 
             # 3. World Model Predicts Next State (conditioned on Predicted Action)

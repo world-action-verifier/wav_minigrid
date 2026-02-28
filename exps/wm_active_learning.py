@@ -84,8 +84,12 @@ def run_active_learning():
     
     full_dataset = MiniGridDynamicsDataset(DATA_PATH)
     obs_shape = full_dataset.states.shape[1:]
+
     
-    inverse_model = SparseIDM(num_actions=7).to(DEVICE)
+    grid_h = full_dataset.states.shape[1]
+    grid_w = full_dataset.states.shape[2]
+    inverse_model = SparseIDM(grid_h=grid_h, grid_w=grid_w, num_actions=7).to(DEVICE)
+
     inverse_model.load_state_dict(torch.load(INVERSE_MODEL_PATH))
     
     dataset_size = len(full_dataset)

@@ -3,6 +3,7 @@ import sys
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
@@ -19,7 +20,8 @@ LR = IDM_COMPARISON["LR"]
 EPOCHS = IDM_COMPARISON["EPOCHS"]
 NUM_ACTIONS = IDM_COMPARISON["NUM_ACTIONS"]
 SEED = IDM_COMPARISON["SEED"]
-
+SEED = 46
+SAVE_MODEL = False
 # Set random seeds
 torch.manual_seed(SEED)
 np.random.seed(SEED)
@@ -31,15 +33,8 @@ def get_dataloaders(train_path, test_path, batch_size=64):
     """Create train and test dataloaders."""
     train_dataset = NormalizedDataset(MiniGridDynamicsDataset(train_path))
     test_dataset = NormalizedDataset(MiniGridDynamicsDataset(test_path))
-    
-    train_ratio = 0.1 # Here we simulate the scenario of few samples.
-    dataset_size = len(train_dataset)
-    num_samples = max(1, int(dataset_size * train_ratio))
-    indices = np.random.choice(dataset_size, size=num_samples, replace=False)
-    subset = Subset(train_dataset, indices)
-    train_loader = DataLoader(subset, batch_size=BATCH_SIZE, shuffle=True)
-    
-    # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
     return train_loader, test_loader
@@ -61,7 +56,11 @@ def evaluate_model(model, dataloader, device, verbose=False):
             inputs['carried_obj'] = inputs['carried_obj'].permute(1, 0, 2)
             actions = batch['action'].to(device)
             
-            logits = model(inputs)
+            outputs = model(inputs)
+            if isinstance(model, SparseIDM):
+                logits, _, _ = outputs
+            else:
+                logits = outputs
             pred = torch.argmax(logits, dim=1)
             
             correct_batch = (pred == actions)
@@ -108,36 +107,63 @@ def train_model(model, train_loader, test_loader, model_name, device, epochs=200
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
     
+    num_batches = len(train_loader)
+    total_steps = epochs * num_batches if num_batches > 0 else 1
+
     for epoch in tqdm(range(epochs), desc=f"Training {model_name}"):
         model.train()
         total_loss = 0
         total_correct = 0
         total_samples = 0
         
-        for batch in train_loader:
-            inputs = {k: v.to(device) for k, v in batch.items() if k != 'action'}
-            inputs['frame'] = inputs['frame'].permute(1, 0, 2, 3, 4)
-            inputs['carried_col'] = inputs['carried_col'].permute(1, 0, 2)
-            inputs['carried_obj'] = inputs['carried_obj'].permute(1, 0, 2)
-            actions = batch['action'].to(device)
+        for batch_idx, batch in enumerate(train_loader):
+            obs_inputs = {k: v.to(device) for k, v in batch.items() if k != 'action'}
+            obs_inputs['frame'] = obs_inputs['frame'].permute(1, 0, 2, 3, 4)
+            obs_inputs['carried_col'] = obs_inputs['carried_col'].permute(1, 0, 2)
+            obs_inputs['carried_obj'] = obs_inputs['carried_obj'].permute(1, 0, 2)
+            target_actions = batch['action'].to(device)
             
             optimizer.zero_grad()
-            logits = model(inputs)
-            loss = criterion(logits, actions)
+            outputs = model(obs_inputs)
+            
+            if isinstance(model, SparseIDM):
+                action_logits, mask, mask_logits = outputs
+
+                ce_loss = F.cross_entropy(action_logits, target_actions)
+
+                target_cells = 2.0
+                cells_selected = mask.sum(dim=(1, 2, 3))
+                # sparsity_loss = torch.mean((cells_selected - target_cells) ** 2)
+                sparsity_loss = torch.mean(torch.abs(cells_selected - target_cells))
+
+                # Sparse Loss warmup: Lambda increases linearly from 0 to the target value.
+                target_lambda = 0.1
+                current_step = epoch * num_batches + batch_idx
+                warmup_lambda = target_lambda * min(float(current_step) / max(total_steps - 1, 1), 1.0)
+
+                loss = ce_loss + warmup_lambda * sparsity_loss
+                logits_for_metrics = action_logits
+            else:
+                logits_for_metrics = outputs
+                loss = criterion(logits_for_metrics, target_actions)
+
             loss.backward()
             optimizer.step()
             
             total_loss += loss.item()
-            pred = torch.argmax(logits, dim=1)
-            total_correct += (pred == actions).sum().item()
-            total_samples += actions.size(0)
-    
+            pred = torch.argmax(logits_for_metrics, dim=1)
+            total_correct += (pred == target_actions).sum().item()
+            total_samples += target_actions.size(0)
+            num_batches += 1
+        
     # Final evaluation on test set
     # print(f"\nEvaluating {model_name} on test set...")
+    if SAVE_MODEL:
+        torch.save(model.state_dict(), f"{model_name}.pth")
+        
     action_accuracies, avg_acc = evaluate_model(model, test_loader, device, verbose=False)
     
     return model, action_accuracies, avg_acc
-
 
 def main():
     print(f"Device: {DEVICE}")
@@ -146,6 +172,10 @@ def main():
     
     # Load data
     train_loader, test_loader = get_dataloaders(TRAIN_DATA_PATH, TEST_DATA_PATH, BATCH_SIZE)
+    
+    sample_batch = next(iter(train_loader))
+    frame_sample = sample_batch["frame"]  # 形状通常为 [B, T, H, W, 3]
+    grid_h, grid_w = frame_sample.shape[2], frame_sample.shape[3]
     
     results = {}
     
@@ -158,14 +188,14 @@ def main():
     results['DenseIDM'] = {'action_acc': dense_action_acc, 'avg_acc': dense_avg_acc}
     
     # Train and evaluate SparseIDM
-    sparse_model = SparseIDM(num_actions=NUM_ACTIONS)
+    sparse_model = SparseIDM(grid_h=grid_h, grid_w=grid_w, num_actions=NUM_ACTIONS)
     sparse_model, sparse_action_acc, sparse_avg_acc = train_model(
         sparse_model, train_loader, test_loader,
         "SparseIDM", DEVICE, EPOCHS, LR
     )
     results['SparseIDM'] = {'action_acc': sparse_action_acc, 'avg_acc': sparse_avg_acc}
     
-    # Print comparison results - only interaction actions (3, 4, 5, 6) and average
+    # Print comparison results - interaction actions (3, 4, 5, 6) and average
     interaction_actions = [3, 4, 5, 6]  # Pickup, Drop, Toggle, Done
     
     print(f"\n{'='*60}")

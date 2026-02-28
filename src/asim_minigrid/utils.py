@@ -9,13 +9,15 @@ import numpy as np
 import random
 from tqdm import tqdm
 
+from asim_minigrid.models import SparseIDM
+
 def train_world_model(
     model, 
     train_loader, 
     epochs, 
     lr, 
     device, 
-    freeze_func, 
+    freeze_func=None, 
     forward_carried_loss_weight=1.0
 ):
     """
@@ -31,14 +33,15 @@ def train_world_model(
         forward_carried_loss_weight: Weight for the carried object loss.
     """
     # Freeze parameters (train only adapter and dynamics)
-    freeze_func(model)
+    if freeze_func is not None:
+        freeze_func(model)
     
     # Filter trainable parameters
     trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = optim.Adam(trainable_params, lr=lr)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=10, verbose=True
-    )
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer, mode='min', factor=0.5, patience=10, verbose=True
+    # )
     
     criterion_ce = nn.CrossEntropyLoss()
     criterion_mse = nn.MSELoss()
@@ -95,7 +98,7 @@ def train_world_model(
             num_batches += 1
         
         avg_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
-        scheduler.step(avg_loss)
+        # scheduler.step(avg_loss)
         
         if avg_loss < best_loss:
             best_loss = avg_loss
@@ -126,7 +129,14 @@ def train_inverse_model(
     print(f"Start training Inverse Model for {epochs} epochs")
     
     # Initialize model
-    model = model_class(num_actions=num_actions).to(device)
+    first_batch = next(iter(train_loader))
+    frame_sample = first_batch["frame"]  # [B, T, H, W, C]
+    grid_h, grid_w = frame_sample.shape[2], frame_sample.shape[3]
+
+    if model_class is SparseIDM:
+        model = model_class(grid_h=grid_h, grid_w=grid_w, num_actions=num_actions).to(device)
+    else:
+        model = model_class(num_actions=num_actions).to(device)
     
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -151,11 +161,18 @@ def train_inverse_model(
             
             # Forward pass
             output = model(inputs)
-            logits = output
-            # Cross Entropy Loss
-            ce_loss = criterion(logits, actions)
 
-            loss = ce_loss
+            if isinstance(model, SparseIDM):
+                action_logits, mask, mask_logits = output
+                ce_loss = criterion(action_logits, actions)
+                target_cells = 2.0
+                cells_selected = mask.sum(dim=(1, 2, 3))
+                sparsity_loss = torch.mean((cells_selected - target_cells) ** 2)
+                loss = ce_loss + 0.1 * sparsity_loss
+                logits = action_logits
+            else:
+                logits = output
+                loss = criterion(logits, actions)
             
             # Backpropagation
             optimizer.zero_grad()
@@ -223,15 +240,16 @@ def prepare_batch_for_model(batch, device):
     return inputs, actions
 
 
-def test_world_model(model, test_loader, forward_carried_loss_weight=10.0, device=None):
+def test_world_model(model, test_loader, device=None, interact_only=False):
     """
     Test world model and compute dynamic accuracy.
     
     Args:
         model: Trained world model
         test_loader: Test data loader
-        forward_carried_loss_weight: Weight for carried loss
         device: Device to run on
+        interact_only: If True, only evaluate batches whose actions are interaction
+            actions (excluding actions 0, 1, 2).
     
     Returns:
         Dictionary with dynamic accuracy metrics
@@ -250,8 +268,28 @@ def test_world_model(model, test_loader, forward_carried_loss_weight=10.0, devic
         for batch in tqdm(test_loader, desc="Testing World Model"):
             inputs, actions = prepare_batch_for_model(batch, device)
             
+            # Optionally restrict evaluation to interaction actions (exclude 0, 1, 2)
+            if interact_only:
+                interact_mask = actions > 2
+                if interact_mask.sum() == 0:
+                    continue
+                
+                actions = actions[interact_mask]
+                for k, v in inputs.items():
+                    if not isinstance(v, torch.Tensor):
+                        continue
+                    # Batch dimension as first dim
+                    if v.dim() == 1 and v.shape[0] == interact_mask.shape[0]:
+                        inputs[k] = v[interact_mask]
+                    # Batch dimension as second dim (e.g. [T, B, ...])
+                    elif v.dim() >= 2 and v.shape[1] == interact_mask.shape[0]:
+                        inputs[k] = v[:, interact_mask]
+            
             # Forward pass
-            pred = model(inputs, mode='predict_with_action', gt_actions=actions)
+            if isinstance(model, SparseIDM):
+                pred, _ , _ = model(inputs, mode='predict_with_action', gt_actions=actions)
+            else:
+                pred = model(inputs, mode='predict_with_action', gt_actions=actions)
             
             gt_next_frame = inputs['frame'][1]  # [B, H, W, C]
             prev_frame = inputs['frame'][0].float()
@@ -324,7 +362,7 @@ def test_world_model(model, test_loader, forward_carried_loss_weight=10.0, devic
     }
 
 
-def test_inverse_model(inverse_model, oracle, test_loader, device=None):
+def test_inverse_model(inverse_model, oracle, test_loader, device=None, interact_only=False):
     """
     Test inverse model and compute dynamic accuracy.
     
@@ -333,6 +371,8 @@ def test_inverse_model(inverse_model, oracle, test_loader, device=None):
         oracle: MiniGridPhysicsOracle instance
         test_loader: Test data loader
         device: Device to run on
+        interact_only: If True, only evaluate samples whose ground-truth
+            actions are interaction actions (excluding actions 0, 1, 2).
     
     Returns:
         Dictionary with dynamic accuracy metrics
@@ -353,6 +393,17 @@ def test_inverse_model(inverse_model, oracle, test_loader, device=None):
             frames = inputs['frame']  # [B, T, H, W, C]
             carried_col = inputs['carried_col']  # [B, T, 1]
             carried_obj = inputs['carried_obj']  # [B, T, 1]
+            actions = batch['action'].to(device)  # [B]
+            
+            # Optionally restrict evaluation to interaction actions (exclude 0, 1, 2)
+            if interact_only:
+                interact_mask = actions > 2
+                if interact_mask.sum() == 0:
+                    continue
+                actions = actions[interact_mask]
+                frames = frames[interact_mask]
+                carried_col = carried_col[interact_mask]
+                carried_obj = carried_obj[interact_mask]
             
             curr_frame = frames[:, 0]
             next_frame_gt = frames[:, 1]
@@ -373,9 +424,13 @@ def test_inverse_model(inverse_model, oracle, test_loader, device=None):
             }
             
             # Predict action
-            output = inverse_model(inv_inputs)
+            if isinstance(inverse_model, SparseIDM):
+                output, _, _ = inverse_model(inv_inputs)
+            else:
+                output = inverse_model(inv_inputs)
+                
             if isinstance(output, tuple):
-                pred_action_logits, _ = output
+                pred_action_logits = output[0]
             else:
                 pred_action_logits = output
             pred_actions = torch.argmax(pred_action_logits, dim=1)

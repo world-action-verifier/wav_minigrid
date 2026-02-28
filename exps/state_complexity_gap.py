@@ -15,7 +15,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.insert(0, project_root)
 
 from asim_minigrid.dataset import MiniGridDynamicsDataset
-from asim_minigrid.models import WorldModel, SparseIDM
+from asim_minigrid.models import WorldModel, SparseIDM, DenseIDM
 from asim_minigrid.evaluate_generation import MiniGridPhysicsOracle
 from asim_minigrid.utils import test_world_model, test_inverse_model
 from asim_minigrid.config import STATE_COMPLEXITY_GAP, DEVICE
@@ -63,7 +63,7 @@ def load_world_model(model_path, obs_shape, num_actions):
     return model
 
 
-def load_inverse_model(model_path, num_actions):
+def load_inverse_model(model_path, num_actions, grid_h, grid_w, model_class):
     """
     Load trained inverse model.
     
@@ -75,8 +75,10 @@ def load_inverse_model(model_path, num_actions):
         Loaded model
     """
     print(f"Loading Inverse Model from: {model_path}")
-
-    model = SparseIDM(num_actions=num_actions).to(DEVICE)
+    if model_class is SparseIDM:
+        model = model_class(grid_h=grid_h, grid_w=grid_w, num_actions=num_actions).to(DEVICE)
+    else:
+        model = model_class(num_actions=num_actions).to(DEVICE)
     
     checkpoint = torch.load(model_path, map_location=DEVICE)
     model.load_state_dict(checkpoint, strict=False)
@@ -101,7 +103,6 @@ def evaluate_on_dataset(
     world_results = test_world_model(
         world_model,
         test_loader,
-        forward_carried_loss_weight=forward_carried_loss_weight,
         device=DEVICE,
     )
 
@@ -195,9 +196,13 @@ def main():
             )
 
             print("Loading Inverse Model...")
+            grid_h, grid_w = obs_shape[0], obs_shape[1]
             inverse_model = load_inverse_model(
                 args.inverse_model_path,
                 num_actions,
+                grid_h,
+                grid_w,
+                model_class=SparseIDM
             )
             loaded_obs_shape = obs_shape
 

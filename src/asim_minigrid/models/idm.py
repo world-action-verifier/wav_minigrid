@@ -148,8 +148,162 @@ class DenseIDM(nn.Module):
         
         combined = torch.cat([curr_emb, next_emb, dir_delta, pos_delta], dim=-1)
         return self.head(combined)
+
+class MaskGenerator(nn.Module):
+    def __init__(self, in_channels=6):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 2, kernel_size=1) 
+        )
         
+        with torch.no_grad():
+            self.net[-1].bias[1] = 2.0
+            self.net[-1].bias[0] = 0.0
+
+    def forward(self, x, tau=1.0):
+        logits = self.net(x)
+        probs = F.gumbel_softmax(logits, tau=tau, hard=True, dim=1)
+        return probs[:, 1:2, :, :], logits
+
 class SparseIDM(nn.Module):
+    def __init__(self, grid_h, grid_w, num_actions=8, embedding_dim=64):
+        super().__init__()
+        self.num_actions = num_actions
+        self.embedding_dim = embedding_dim
+        
+        # 1. 轻量化 CNN (Bottleneck 结构)
+        # 将输入编码为 32 维的语义特征
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32), # 加入 BN 稳定少样本训练
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=1), # 1x1 卷积增加非线性
+            nn.ReLU()
+        )
+        
+        # 2. 改进的 Mask Generator (增加初始化偏置)
+        self.mask_gen = MaskGenerator(in_channels=6)
+        
+        # 3. 状态投影层：现在的输入维度只是通道数 (32) + 携带物信息 (2)
+        # 维度大幅缩小：从 64*H*W 降到了 32！
+        self.state_projector = nn.Linear(32 + 2, embedding_dim)
+        
+        # 4. 动作预测 Head
+        input_dim = (embedding_dim * 2) + 2 + 2 + 2 + 2
+        self.head = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, num_actions)
+        )
+
+    def _encode_with_mask(self, frame, carried_col, carried_obj, mask):
+        x = frame.permute(0, 3, 1, 2).float() # [B, 3, H, W]
+        
+        # A. 提取每个格点的特征
+        features = self.feature_extractor(x)  # [B, 32, H, W]
+        
+        # B. 施加 Mask 并通过全局池化聚合
+        # mask shape: [B, 1, H, W]
+        # 我们只保留被 mask 选中的格子的特征，并把它们加起来
+        # 这就是一种“硬注意力”机制
+        masked_features = features * mask 
+        
+        # 关键改动：全局空间求和，把 [B, 32, H, W] 变成 [B, 32]
+        # 这样模型就不用去管物体在哪，只需要管“选中的物体是什么”
+        sum_features = torch.sum(masked_features, dim=(2, 3)) 
+        
+        # C. 拼接状态
+        carried = torch.cat([carried_col, carried_obj], dim=-1).float()
+        combined = torch.cat([sum_features, carried], dim=1)
+        
+        return F.relu(self.state_projector(combined))
+
+    def _extract_direction(self, frame):
+        """提取 agent 朝向 (0-3)"""
+        B, H, W, C = frame.shape
+        directions = []
+        agent_mask = (frame[..., 0] == 10)
+        
+        for i in range(B):
+            idx = agent_mask[i].nonzero()
+            if idx.shape[0] > 0:
+                y, x = int(idx[0][0]), int(idx[0][1])
+                d = int(frame[i, y, x, 2].item()) % 4
+                directions.append(d)
+            else:
+                directions.append(0)
+        return directions
+
+    def _extract_position(self, frame):
+        """提取 agent 的归一化坐标 (y, x)"""
+        B, H, W, C = frame.shape
+        coords = torch.zeros(B, 2, device=frame.device)
+        agent_mask = (frame[..., 0] == 10)
+        
+        for i in range(B):
+            idx = agent_mask[i].nonzero()
+            if idx.shape[0] > 0:
+                y, x = float(idx[0][0]), float(idx[0][1])
+                coords[i, 0] = y / (H - 1)
+                coords[i, 1] = x / (W - 1)
+            else:
+                coords[i] = 0.5
+        return coords
+
+    def _encode_direction_delta(self, curr_dirs, next_dirs, device):
+        """将方向差编码为 sin/cos"""
+        curr = torch.tensor(curr_dirs, device=device, dtype=torch.float32)
+        next_ = torch.tensor(next_dirs, device=device, dtype=torch.float32)
+        
+        delta = (next_ - curr + 4) % 4
+        angle = delta * (2 * 3.14159 / 4)
+        
+        sin_ = torch.sin(angle).unsqueeze(1)
+        cos_ = torch.cos(angle).unsqueeze(1)
+        return torch.cat([sin_, cos_], dim=1)
+    
+
+    def forward(self, obs_inputs, tau=1.0):
+        frames = obs_inputs['frame'] 
+        curr_frame = frames[0]
+        next_frame = frames[1]
+        
+        # 1. 准备 Mask Generator 的输入 (两帧拼接以捕捉 Toggle 变化)
+        curr_p = curr_frame.permute(0, 3, 1, 2).float()
+        next_p = next_frame.permute(0, 3, 1, 2).float()
+        combined_for_mask = torch.cat([curr_p, next_p], dim=1) # [B, 6, H, W]
+        
+        # 2. 生成全局唯一的空间 Mask
+        mask, mask_logits = self.mask_gen(combined_for_mask, tau=tau)
+        
+        # 3. 特征空间编码
+        carried_col = obs_inputs['carried_col']
+        carried_obj = obs_inputs['carried_obj']
+        curr_carried = torch.cat([carried_col[0], carried_obj[0]], dim=-1).float()
+        next_carried = torch.cat([carried_col[1], carried_obj[1]], dim=-1).float()
+        curr_emb = self._encode_with_mask(curr_frame, carried_col[0], carried_obj[0], mask)
+        next_emb = self._encode_with_mask(next_frame, carried_col[1], carried_obj[1], mask)
+        
+        # 4. 显式几何特征提取 (保持不变)
+        curr_dir = self._extract_direction(curr_frame)
+        next_dir = self._extract_direction(next_frame)
+        curr_pos = self._extract_position(curr_frame)
+        next_pos = self._extract_position(next_frame)
+        
+        dir_delta = self._encode_direction_delta(curr_dir, next_dir, curr_emb.device)
+        pos_delta = next_pos - curr_pos
+        
+        # 5. Head
+        combined = torch.cat(
+            [curr_emb, next_emb, curr_carried, next_carried, dir_delta, pos_delta], 
+            dim=-1
+        )
+        return self.head(combined), mask, mask_logits
+
+class OracleSparseIDM(nn.Module):
     """
     Sparse Inverse Dynamics Model.
     Focuses on two cells: agent center and front position.

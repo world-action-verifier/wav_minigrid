@@ -70,6 +70,12 @@ pip install -e .
 ```
 ## 🎮 MiniGrid Tasks 
 
+We evaluate WAV on three complex tasks in MiniGrid designed to test long-horizon dependencies and compositional logic. Each task requires precise manipulation of objects (Key, Ball, Box) based on their color attributes.
+
+* **Key Delivery**: A multi-stage manipulation task: Match Key color to Box → Insert Key into Box → Swap Box with Ball → Match Ball color to Box → Reach Goal.
+* **Ball Delivery**: A structural mirror of Key Delivery: Place the Ball into the Box first, then manipulate the Key according to color constraints before reaching the goal.
+* **Object Matching**: A coordination challenge: Synchronize both Key and Ball colors with a reference Box, then arrange all objects together before exiting.
+
 <p align="center">
   <table>
     <tr>
@@ -96,12 +102,6 @@ pip install -e .
     </tr>
   </table>
 </p>
-
-We evaluate WAV on three complex tasks in MiniGrid designed to test long-horizon dependencies and compositional logic. Each task requires precise manipulation of objects (Key, Ball, Box) based on their color attributes.
-
-* **Key Delivery**: A multi-stage manipulation task: Match Key color to Box → Insert Key into Box → Swap Box with Ball → Match Ball color to Box → Reach Goal.
-* **Ball Delivery**: A structural mirror of Key Delivery: Place the Ball into the Box first, then manipulate the Key according to color constraints before reaching the goal.
-* **Object Matching**: A coordination challenge: Synchronize both Key and Ball colors with a reference Box, then arrange all objects together before exiting.
 
 ---
 

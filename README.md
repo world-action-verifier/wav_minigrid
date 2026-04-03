@@ -4,27 +4,6 @@
   Self-Improving World Models via Forward-Inverse Asymmetry
 </h2>
 
-[Yuejiang Liu](https://sites.google.com/view/yuejiangliu)<sup>&dagger;,\*</sup>, 
-[Fan Feng](https://profiles.ucsd.edu/fan.feng)<sup>&Dagger;,\*</sup>, 
-[Lingjing Kong](https://lingjing-kong.github.io/)<sup>&sect;,\*</sup>, 
-[Weifeng Lu](https://world-action-verifier.github.io/),
-[Jinzhou Tang](https://world-action-verifier.github.io/)<sup>&Dagger;</sup>,  
-[Kun Zhang](https://www.andrew.cmu.edu/user/kunz1/index.html)<sup>&sect;</sup>, 
-[Kevin Murphy](https://www.cs.ubc.ca/~murphyk/)<sup>&para;</sup>, 
-[Chelsea Finn](https://ai.stanford.edu/~cbfinn/)<sup>&dagger;</sup>, 
-[Yilun Du](https://yilundu.github.io/)<sup>||</sup>
-
-<br>
-
-<sup>&dagger;</sup> Stanford University &nbsp;&nbsp;
-<sup>&Dagger;</sup> University of California, San Diego &nbsp;&nbsp;
-<sup>&sect;</sup> Carnegie Mellon University &nbsp;&nbsp;
-<br>
-<sup>&para;</sup> Google DeepMind &nbsp;&nbsp;
-<sup>||</sup> Harvard University &nbsp;&nbsp;
-<sup>*</sup> Equal contribution
-
-
 <a href='https://arxiv.org/abs/2604.01985'><img src='https://img.shields.io/badge/ArXiv-2510.10125-red'></a> 
 <a href='https://world-action-verifier.github.io/'><img src='https://img.shields.io/badge/Project-Page-Blue'></a> 
 

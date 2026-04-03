@@ -1,9 +1,9 @@
 <div align="center">
 <h2><center>👉 World Action Verifier: Self-Improving World Models via Forward-Inverse Asymmetry </h2>
 
-[Yuejiang Liu](https://sites.google.com/view/yuejiangliu)<sup>&dagger;,*</sup>, 
-[Fan Feng](https://profiles.ucsd.edu/fan.feng)<sup>&Dagger;,*</sup>, 
-[Lingjing Kong](https://lingjing-kong.github.io/)<sup>&sect;,*</sup>, 
+[Yuejiang Liu](https://sites.google.com/view/yuejiangliu)<sup>&dagger;,\*</sup>, 
+[Fan Feng](https://profiles.ucsd.edu/fan.feng)<sup>&Dagger;,\*</sup>, 
+[Lingjing Kong](https://lingjing-kong.github.io/)<sup>&sect;,\*</sup>, 
 [Weifeng Lu](https://world-action-verifier.github.io/)
 [Jinzhou Tang](https://world-action-verifier.github.io/)<sup>&Dagger;</sup>,  
 [Kun Zhang](https://www.andrew.cmu.edu/user/kunz1/index.html)<sup>&sect;</sup>, 

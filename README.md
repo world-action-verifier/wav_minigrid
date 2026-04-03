@@ -7,7 +7,7 @@
 [Weifeng Lu](https://world-action-verifier.github.io/)
 [Jinzhou Tang](https://world-action-verifier.github.io/)<sup>&Dagger;</sup>,  
 [Kun Zhang](https://www.andrew.cmu.edu/user/kunz1/index.html)<sup>&sect;</sup>, 
-[Kevin Patrick Murphy](https://www.cs.ubc.ca/~murphyk/)<sup>&para;</sup>, 
+[Kevin Murphy](https://www.cs.ubc.ca/~murphyk/)<sup>&para;</sup>, 
 [Chelsea Finn](https://ai.stanford.edu/~cbfinn/)<sup>&dagger;</sup>, 
 [Yilun Du](https://yilundu.github.io/)<sup>||</sup>
 

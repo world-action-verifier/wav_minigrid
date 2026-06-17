@@ -39,7 +39,7 @@ conda create -n wav_minigrid python=3.7
 conda activate wav_minigrid
 
 # clone repository
-git clone https://github.com/Weifeng2829/WAV-MiniGrid.git
+git clone https://github.com/world-action-verifier/wav_minigrid.git
 cd WAV-MiniGrid
 
 # install dependencies

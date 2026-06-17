@@ -167,7 +167,7 @@ if __name__ == "__main__":
         "--data_paths",
         nargs="+",
         default=None,
-        help="One or more .npz paths to merge (same格式 as MiniGridDynamicsDataset).默认见 config.VIDEO_TRAINING['DATA_PATHS']",
+        help="One or more .npz paths to merge",
     )
     parser.add_argument(
         "--pretrained_path",

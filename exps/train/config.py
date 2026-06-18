@@ -28,14 +28,6 @@ VIDEO_TRAINING = {
         "data",
         "MiniGrid-Empty-Interact-6x6-o3-v0_video_pretraing.npz"
     ),
-    "DATA_PATHS": [
-        os.path.join(
-            MINIGRID_DIR,
-            "data",
-            "MiniGrid-Empty-Interact-6x6-o3-v0_MultiTaskPolicy_data_pool.npz",
-        ),
-        os.path.join(MINIGRID_DIR, "data", "oracle_training_dataset.npz"),
-    ],
     "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
     "PRIOR_WEIGHT": 5.0,
     "VQ_LOSS_WEIGHT": 0,

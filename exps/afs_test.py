@@ -1,3 +1,13 @@
+"""
+Action Following Score (AFS) evaluation.
+
+Note: The AFS benchmark uses a dedicated active-learning setup that is separate
+from the prediction-error benchmark reported in the paper. All methods are
+compared using models obtained from the same active-learning round within the
+AFS benchmark.
+
+This file reproduces the AFS metric used in the paper.
+"""
 import argparse
 import json
 import os

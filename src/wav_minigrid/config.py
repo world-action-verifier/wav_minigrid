@@ -196,8 +196,7 @@ WM_ACTIVE_LEARNING = {
     "STAGE1_CKPT": os.path.join(
         MINIGRID_DIR, 
         "checkpoints", 
-        # "pretrained_base_world_model.pth" # initialized from the Pre-trained Video Model; trained from the random selected data
-        "pretrained_video_model.pth" # initialized from the Pre-trained Video Model; trained from the random selected data
+        "pretrained_base_world_model.pth" # initialized from the Pre-trained Video Model; trained from the random selected data
     ),
     "INVERSE_MODEL_PATH": os.path.join(
         MINIGRID_DIR, 

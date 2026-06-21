@@ -64,7 +64,7 @@ def train_stage1(args):
         writer = csv.writer(f)
         writer.writerow(['epoch', 'train_loss', 'test_loss'])
 
-    print(f"Starting Stage 1 Training (No Action Condition)...")
+    print(f"Starting Stage 1 Training...")
     
     if args.use_wandb:
         wandb.init(

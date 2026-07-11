@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 from wav_minigrid.evaluate_generation import MiniGridPhysicsOracle
-from wav_minigrid.models import SparseIDM
+from wav_minigrid.models import SparseIDM, WorldModel
 
 
 def set_all_seeds(seed: int) -> None:
@@ -23,7 +23,60 @@ def set_all_seeds(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def load_checkpoint(model, ckpt_path, device=None):
+    """Load weights into an existing model."""
+    if device is None:
+        device = next(model.parameters()).device
+    print(f"Loading {model.__class__.__name__} from {ckpt_path}")
+    checkpoint = torch.load(ckpt_path, map_location=device)
+    state_dict = (
+        checkpoint["model_state_dict"]
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint
+        else checkpoint
+    )
+    model.load_state_dict(state_dict, strict=False)
+    model.eval()
+    return model
 
+def load_world_model(model_path, obs_shape, num_actions=7, device=None):
+    """Create a WorldModel and load a checkpoint."""
+    from wav_minigrid.config import DEVICE
+
+    if device is None:
+        device = DEVICE
+    print(f"Loading Stage 1 Model from: {model_path}")
+    model = WorldModel(obs_shape, num_actions).to(device)
+    checkpoint = torch.load(model_path, map_location=device)
+    state_dict = (
+        checkpoint["model_state_dict"]
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint
+        else checkpoint
+    )
+    model.load_state_dict(state_dict, strict=False)
+    model.eval()
+
+    model_keys = set(model.state_dict().keys())
+    checkpoint_keys = set(state_dict.keys())
+    missing_keys = checkpoint_keys - model_keys
+    unexpected_keys = model_keys - checkpoint_keys
+    if missing_keys:
+        print(f"  [Warning] Missing keys: {len(missing_keys)}")
+    if unexpected_keys:
+        print(f"  [Warning] Unexpected keys: {len(unexpected_keys)}")
+    return model
+
+
+def resolve_al_save_dir():
+    """Return active-learning checkpoint directory."""
+    import os
+    from wav_minigrid.config import MINIGRID_DIR
+
+    save_dir = os.path.join(MINIGRID_DIR, "checkpoints/stage2_active_learning")
+    alt_save_dir = os.path.join(os.path.dirname(MINIGRID_DIR), "checkpoints/stage2_active_learning")
+    if os.path.isdir(alt_save_dir):
+        return alt_save_dir
+    return save_dir
+    
 def compute_loss_for_pool(
     model,
     dataset,

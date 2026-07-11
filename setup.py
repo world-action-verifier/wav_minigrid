@@ -8,10 +8,4 @@ setup(
         "": "src",
         "env": "env",
     },
-    install_requires=[
-        "gym>=0.9.6",
-        "numpy>=1.15.0",
-        "matplotlib",
-        "tqdm",
-    ],
 )

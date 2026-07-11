@@ -1,5 +1,18 @@
 import numpy as np
-from gym_minigrid.minigrid import MiniGridEnv, WorldObj, COLORS, fill_coords, point_in_rect, point_in_circle
+from gym_minigrid.minigrid import (
+    MiniGridEnv,
+    WorldObj,
+    COLORS,
+    fill_coords,
+    point_in_rect,
+    point_in_circle,
+    Grid,
+    TILE_PIXELS,
+)
+from gym_minigrid.rendering import highlight_img
+
+# Off-white grey for outer walls in InteractiveMiniGridEnv render
+WALL_COLOR = np.array([215, 215, 215], dtype=np.uint8)
 
 # COLOR_CYCLE = ['red', 'green', 'blue', 'purple', 'yellow', 'grey']
 COLOR_CYCLE = ['red', 'blue']
@@ -122,6 +135,119 @@ class InteractiveMiniGridEnv(MiniGridEnv):
     This is an enhanced MiniGrid environment base class.
     It redefines the originally unused 'done' action as 'switch' (swap objects in hand and in front).
     """
+
+    @staticmethod
+    def _is_wall_cell(cell):
+        return cell is not None and cell.type == 'wall'
+
+    def _get_highlight_mask(self, highlight=True):
+        if not highlight:
+            return np.zeros((self.width, self.height), dtype=np.bool)
+
+        _, vis_mask = self.gen_obs_grid()
+        f_vec = self.dir_vec
+        r_vec = self.right_vec
+        top_left = (
+            self.agent_pos
+            + f_vec * (self.agent_view_size - 1)
+            - r_vec * (self.agent_view_size // 2)
+        )
+
+        highlight_mask = np.zeros((self.width, self.height), dtype=np.bool)
+        for vis_j in range(self.agent_view_size):
+            for vis_i in range(self.agent_view_size):
+                if not vis_mask[vis_i, vis_j]:
+                    continue
+                abs_i, abs_j = top_left - (f_vec * vis_j) + (r_vec * vis_i)
+                if 0 <= abs_i < self.width and 0 <= abs_j < self.height:
+                    highlight_mask[abs_i, abs_j] = True
+        return highlight_mask
+
+    @staticmethod
+    def _draw_grid_lines(tile):
+        fill_coords(tile, point_in_rect(0, 0.031, 0, 1), WALL_COLOR)
+        fill_coords(tile, point_in_rect(0, 1, 0, 0.031), WALL_COLOR)
+
+    def _render_tile_white_floor(self, cell, agent_dir=None, highlight=False, tile_size=TILE_PIXELS):
+        """Render interior tiles on a white background with WALL_COLOR grid lines."""
+        tile = np.full((tile_size, tile_size, 3), 255, dtype=np.uint8)
+        self._draw_grid_lines(tile)
+
+        fg = Grid.render_tile(
+            cell,
+            agent_dir=agent_dir,
+            highlight=False,
+            tile_size=tile_size,
+        )
+        is_bright = np.max(fg, axis=2) > 20
+        is_default_grid = np.all(np.abs(fg.astype(np.int16) - 100) <= 8, axis=-1)
+        content = is_bright & ~is_default_grid
+        tile[content] = fg[content]
+
+        if highlight:
+            highlight_img(tile)
+        return tile
+
+    def _render_tile_wall(self, highlight=False, tile_size=TILE_PIXELS):
+        """Render outer wall tiles in off-white grey."""
+        tile = np.full((tile_size, tile_size, 3), WALL_COLOR, dtype=np.uint8)
+        if highlight:
+            highlight_img(tile)
+        return tile
+
+    def _render_interactive_grid(self, tile_size, agent_pos, agent_dir, highlight_mask):
+        width_px = self.width * tile_size
+        height_px = self.height * tile_size
+        img = np.zeros((height_px, width_px, 3), dtype=np.uint8)
+
+        for j in range(self.height):
+            for i in range(self.width):
+                cell = self.grid.get(i, j)
+                agent_here = np.array_equal(agent_pos, (i, j))
+                if self._is_wall_cell(cell):
+                    tile_img = self._render_tile_wall(
+                        highlight=highlight_mask[i, j],
+                        tile_size=tile_size,
+                    )
+                else:
+                    tile_img = self._render_tile_white_floor(
+                        cell,
+                        agent_dir=agent_dir if agent_here else None,
+                        highlight=highlight_mask[i, j],
+                        tile_size=tile_size,
+                    )
+
+                ymin, ymax = j * tile_size, (j + 1) * tile_size
+                xmin, xmax = i * tile_size, (i + 1) * tile_size
+                img[ymin:ymax, xmin:xmax, :] = tile_img
+
+        return img
+
+    def render(self, mode='human', close=False, highlight=True, tile_size=TILE_PIXELS):
+        """Render full grid with white interior and grey wall border."""
+        if close:
+            if self.window:
+                self.window.close()
+            return
+
+        if mode == 'human' and not self.window:
+            import gym_minigrid.window
+            self.window = gym_minigrid.window.Window('gym_minigrid')
+            self.window.show(block=False)
+
+        highlight_mask = self._get_highlight_mask(highlight)
+        img = self._render_interactive_grid(
+            tile_size,
+            self.agent_pos,
+            self.agent_dir,
+            highlight_mask,
+        )
+
+        if mode == 'human':
+            self.window.show_img(img)
+            self.window.set_caption(self.mission)
+
+        return img
 
     def step(self, action):
         # Let the parent class run standard logic first (handles step counter and standard actions)

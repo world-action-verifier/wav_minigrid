@@ -4,7 +4,7 @@
   Self-Improving World Models via Forward-Inverse Asymmetry
 </h2>
 
-<a href='https://arxiv.org/abs/2604.01985'><img src='https://img.shields.io/badge/ArXiv-2510.10125-red'></a> 
+<a href='https://arxiv.org/abs/2604.01985'><img src='https://img.shields.io/badge/ArXiv-2604.01985-red'></a> 
 <a href='https://world-action-verifier.github.io/'><img src='https://img.shields.io/badge/Project-Page-Blue'></a> 
 
 </div>
@@ -28,6 +28,7 @@ This repository contains the code for evaluating:
 * Robustness under increasing state complexity
 * Robustness under environmental noise
 * Active acquisition strategy comparison
+* Action following score comparison
 
 ## 🛠️ Installation 
 
@@ -40,7 +41,7 @@ conda activate wav_minigrid
 
 # clone repository
 git clone https://github.com/world-action-verifier/wav_minigrid.git
-cd WAV-MiniGrid
+cd wav_minigrid
 
 # install dependencies
 pip install -r requirements.txt
@@ -101,7 +102,7 @@ We provide all pre-trained checkpoints and datasets used in the MiniGrid experim
 
 For reference, we also include the code for data collection and model training:
 * **Data Collection**: Code for collecting expert and random playing demonstrations is available in `env/data_collection/`
-* **Model Training**: Training scripts are located in `scripts/train/`
+* **Model Training**: Training scripts are located in `exps/train/`
 
 **Note**: These scripts are optional and not required to run the experiments, as all necessary checkpoints and datasets are already provided in this repository.
 
@@ -152,7 +153,7 @@ python exps/state_complexity_gap.py
 
 ---
 
-### 4. Robustness under Increasing State Complexity
+### 4. Robustness under Environmental Noise
 
 Evaluate model robustness under increasing levels of observation noise.
 
@@ -182,6 +183,21 @@ python exps/wm_active_learning.py
 
 ---
 
+### 6. Action Following Score
+
+Measure how well each learned world model preserves the differences between
+actions in its predicted next states.
+
+```bash
+python exps/afs_test.py
+```
+
+**This experiment evaluates:**
+
+* Action Following Score over the checkpoints in `checkpoints/afs_test_checkpoints/`
+
+---
+
 ### Expected Results
 
 Running the experiments should yield results consistent with the figures below, demonstrating WAV's superior performance across metrics:
@@ -204,7 +220,7 @@ Key Findings:
 ## 📂 Project Structure
 
 ```
-WAV-MiniGrid/
+wav_minigrid/
 ├── README.md
 ├── assets
 ├── checkpoints
@@ -217,6 +233,7 @@ WAV-MiniGrid/
 │   ├── state_complexity_gap.py
 │   ├── noise_robustness.py
 │   ├── wm_active_learning.py
+│   ├── afs_test.py
 │   ├── train
 ├── requirements.txt
 ├── setup.py

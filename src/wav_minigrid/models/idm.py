@@ -65,7 +65,7 @@ class DenseIDM(nn.Module):
         """
         x = frame.permute(0, 3, 1, 2).float()
         features = self.cnn(x)
-        features = features.view(features.size(0), -1)
+        features = features.reshape(features.size(0), -1)
         
         carried = torch.cat([carried_col, carried_obj], dim=-1).float()
         

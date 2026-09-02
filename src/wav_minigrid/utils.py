@@ -114,9 +114,10 @@ def train_inverse_model(
     lr, 
     device, 
     model_class,
+    model=None,
 ):
     """
-    Train the Inverse Model from scratch.
+    Train an inverse model from scratch or fine-tune a supplied model.
     
     Args:
         train_loader: DataLoader for training data.
@@ -125,6 +126,7 @@ def train_inverse_model(
         lr: Learning rate.
         device: torch.device.
         model_class: The class constructor for IDM.
+        model: Existing inverse model to fine-tune. If None, initialize a new model.
     """
     print(f"Start training Inverse Model for {epochs} epochs")
     
@@ -133,14 +135,17 @@ def train_inverse_model(
     frame_sample = first_batch["frame"]  # [B, T, H, W, C]
     grid_h, grid_w = frame_sample.shape[2], frame_sample.shape[3]
 
-    if model_class is SparseIDM:
-        model = model_class(grid_h=grid_h, grid_w=grid_w, num_actions=num_actions).to(device)
+    if model is None:
+        if model_class is SparseIDM:
+            model = model_class(grid_h=grid_h, grid_w=grid_w, num_actions=num_actions).to(device)
+        else:
+            model = model_class(num_actions=num_actions).to(device)
     else:
-        model = model_class(num_actions=num_actions).to(device)
+        model = model.to(device)
     
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=10, verbose=True
+        optimizer, mode='min', factor=0.5, patience=10
     )
     criterion = nn.CrossEntropyLoss()
     

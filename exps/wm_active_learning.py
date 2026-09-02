@@ -11,7 +11,7 @@ sys.path.insert(0, project_root)
 
 from wav_minigrid.models import WorldModel, SparseIDM
 from wav_minigrid.dataset import MiniGridDynamicsDataset, PseudoLabeledSubset, NormalizedDataset, MemoryDynamicsDataset
-from wav_minigrid.utils import freeze_model_for_active_learning
+from wav_minigrid.utils import freeze_model_for_active_learning, train_inverse_model
 from wav_minigrid.al_utils import (
     set_all_seeds,
     query_strategy,
@@ -36,6 +36,7 @@ BATCH_SIZE = WM_ACTIVE_LEARNING["BATCH_SIZE"]
 LR = WM_ACTIVE_LEARNING["LR"]
 EPOCHS_FIRST_ROUND = WM_ACTIVE_LEARNING["EPOCHS_FIRST_ROUND"]
 EPOCHS_PER_ROUND = WM_ACTIVE_LEARNING["EPOCHS_PER_ROUND"]
+INVERSE_MODEL_EPOCHS_PER_ROUND = WM_ACTIVE_LEARNING["INVERSE_MODEL_EPOCHS_PER_ROUND"]
 NUM_ROUNDS = WM_ACTIVE_LEARNING["NUM_ROUNDS"]
 ADD_COUNT_FIRST_ROUND = WM_ACTIVE_LEARNING["ADD_COUNT_FIRST_ROUND"]
 ADD_COUNT_PER_ROUND = WM_ACTIVE_LEARNING["ADD_COUNT_PER_ROUND"]
@@ -188,11 +189,12 @@ def run_active_learning():
                 print(f"Round {round_idx}: Total collected data: {len(collected_real_data)} samples.")
                 
                 part_b = MemoryDynamicsDataset(collected_real_data)
+                part_a = MiniGridDynamicsDataset(BASE_DATA_PATH)
+                inverse_train_dataset = ConcatDataset([
+                    NormalizedDataset(part_a), NormalizedDataset(part_b)
+                ])
                 if USE_BASE_DATA:
-                    part_a = MiniGridDynamicsDataset(BASE_DATA_PATH)
-                    part_a_normalized = NormalizedDataset(part_a)
-                    part_b_normalized = NormalizedDataset(part_b)
-                    train_dataset = ConcatDataset([part_a_normalized, part_b_normalized])
+                    train_dataset = inverse_train_dataset
                 else:
                     train_dataset = part_b
                 
@@ -246,6 +248,16 @@ def run_active_learning():
             
             train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
             print(f"Round {round_idx}: Training dataset size: {len(train_dataset)}")
+
+            if strategy == "WAV":
+                inverse_train_loader = DataLoader(
+                    inverse_train_dataset, batch_size=BATCH_SIZE, shuffle=True
+                )
+                print(f"Round {round_idx}: Fine-tuning inverse model for {INVERSE_MODEL_EPOCHS_PER_ROUND} epochs")
+                inverse_model = train_inverse_model(
+                    inverse_train_loader, 7, INVERSE_MODEL_EPOCHS_PER_ROUND,
+                    LR, DEVICE, SparseIDM, model=inverse_model,
+                )
             
             train_one_round(
                 model,

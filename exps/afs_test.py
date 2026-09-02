@@ -320,7 +320,7 @@ def evaluate_one_model(
     model, init_states, init_carried, actions, action_mode: str,
     action_following_tol: float = 0.0,
 ):
-    """Compute action following score (AFS) aggregated over sampled initial states."""
+    """Compute each initial state's AFS, then average over valid states."""
     oracle = MiniGridPhysicsOracle()
     device = next(model.parameters()).device
     n = init_states.shape[0]
@@ -328,6 +328,8 @@ def evaluate_one_model(
 
     afs_gt_channel_total = 0
     afs_wm_masked_channel_total = 0
+    afs_state_score_total = 0.0
+    per_state_afs_scores = [None] * n
 
     for i in range(n):
         s0, c0 = init_states[i], init_carried[i]
@@ -362,16 +364,24 @@ def evaluate_one_model(
         )
         afs_gt_channel_total += gt_div
         afs_wm_masked_channel_total += wm_masked
+        state_afs_score = (
+            float(wm_masked) / float(gt_div) if gt_div > 0 else 0.0
+        )
+        per_state_afs_scores[i] = state_afs_score
+        afs_state_score_total += state_afs_score
+
+    valid_states_used = n - skipped
 
     return {
         "num_initial_states": n,
-        "valid_states_used": n - skipped,
+        "valid_states_used": valid_states_used,
         "skipped_too_few_actions": skipped,
         "afs_gt_channel_total": int(afs_gt_channel_total),
         "afs_wm_masked_channel_total": int(afs_wm_masked_channel_total),
+        "per_state_afs_scores": per_state_afs_scores,
         "afs_score": (
-            float(afs_wm_masked_channel_total) / float(afs_gt_channel_total)
-            if afs_gt_channel_total > 0 else 0.0
+            afs_state_score_total / float(valid_states_used)
+            if valid_states_used > 0 else 0.0
         ),
     }
 

@@ -35,7 +35,7 @@ We recommend using a clean conda environment.
 
 ```bash
 # create environment
-conda create -n wav_minigrid python=3.7
+conda create -n wav_minigrid python=3.10
 conda activate wav_minigrid
 
 # clone repository
@@ -46,6 +46,22 @@ cd WAV-MiniGrid
 pip install -r requirements.txt
 pip install -e .
 ```
+
+The core requirements are intentionally limited to the packages needed by
+the experiments. The optional data-collection scripts use the legacy
+MiniGrid environment and can be enabled with:
+
+```bash
+pip install gym==0.15.4
+pip install "git+https://github.com/maximecb/gym-minigrid.git@b84d99a2fbb481977172a85661eee812f022f130"
+```
+
+Weights & Biases logging in `exps/train/train_vp.py` additionally requires:
+
+```bash
+pip install wandb
+```
+
 ## 🎮 MiniGrid Tasks 
 
 We evaluate WAV on three complex tasks in MiniGrid designed to test long-horizon dependencies and compositional logic. Each task requires precise manipulation of objects (Key, Ball, Box) based on their color attributes.

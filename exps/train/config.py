@@ -26,7 +26,7 @@ VIDEO_TRAINING = {
     "DATA_PATH": os.path.join(
         MINIGRID_DIR,
         "data",
-        "MiniGrid-Empty-Interact-6x6-o3-v0_video_pretraing.npz"
+        "MiniGrid-Empty-Interact-6x6-o3-v0_video_pretraing_deposit.npz"
     ),
     "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
     "PRIOR_WEIGHT": 5.0,
@@ -72,4 +72,3 @@ IDM_TRAINING = {
     "NUM_ACTIONS": NUM_ACTIONS,
     "SEED": SEED,
 }
-

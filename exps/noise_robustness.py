@@ -97,7 +97,8 @@ def run_noise_experiment(exp_cfg, skip_world_model=False, skip_inverse_model=Fal
         
         print("--- [Inverse Model] Testing ---")
         inverse_model.eval()
-        oracle = MiniGridPhysicsOracle()
+        # The clean o6 evaluation set was collected with box color toggles.
+        oracle = MiniGridPhysicsOracle(box_toggle_mode="color_cycle")
         inverse_model_results = test_inverse_model(
             inverse_model,
             oracle,

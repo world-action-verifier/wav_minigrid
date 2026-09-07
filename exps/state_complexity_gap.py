@@ -107,7 +107,8 @@ def evaluate_on_dataset(
     )
 
     inverse_model.eval()
-    oracle = MiniGridPhysicsOracle()
+    # The o6-o14 random-play datasets were collected with box color toggles.
+    oracle = MiniGridPhysicsOracle(box_toggle_mode="color_cycle")
     inverse_results = test_inverse_model(
         inverse_model,
         oracle,
@@ -251,4 +252,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

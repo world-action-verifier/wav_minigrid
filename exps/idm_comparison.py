@@ -19,13 +19,21 @@ BATCH_SIZE = IDM_COMPARISON["BATCH_SIZE"]
 LR = IDM_COMPARISON["LR"]
 EPOCHS = IDM_COMPARISON["EPOCHS"]
 NUM_ACTIONS = IDM_COMPARISON["NUM_ACTIONS"]
-SEED = IDM_COMPARISON["SEED"]
 SAVE_MODEL = False
-# Set random seeds
-torch.manual_seed(SEED)
-np.random.seed(SEED)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(SEED)
+NUM_SEEDS = 5
+
+
+def sample_seeds(count):
+    """Randomly sample distinct seeds for repeated experiments."""
+    return [int(seed) for seed in np.random.default_rng().choice(2**31, count, replace=False)]
+
+
+def set_seed(seed):
+    """Set all random seeds used by this experiment."""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def get_dataloaders(train_path, test_path, batch_size=64):
@@ -168,47 +176,57 @@ def main():
     print(f"Device: {DEVICE}")
     print(f"Training data: {TRAIN_DATA_PATH}")
     print(f"Test data: {TEST_DATA_PATH}")
-    
-    # Load data
-    train_loader, test_loader = get_dataloaders(TRAIN_DATA_PATH, TEST_DATA_PATH, BATCH_SIZE)
-    
-    sample_batch = next(iter(train_loader))
-    frame_sample = sample_batch["frame"]  # 形状通常为 [B, T, H, W, 3]
-    grid_h, grid_w = frame_sample.shape[2], frame_sample.shape[3]
-    
-    results = {}
-    
-    # Train and evaluate DenseIDM
-    dense_model = DenseIDM(num_actions=NUM_ACTIONS)
-    dense_model, dense_action_acc, dense_avg_acc = train_model(
-        dense_model, train_loader, test_loader, 
-        "DenseIDM", DEVICE, EPOCHS, LR
-    )
-    results['DenseIDM'] = {'action_acc': dense_action_acc, 'avg_acc': dense_avg_acc}
-    
-    # Train and evaluate SparseIDM
-    sparse_model = SparseIDM(grid_h=grid_h, grid_w=grid_w, num_actions=NUM_ACTIONS)
-    sparse_model, sparse_action_acc, sparse_avg_acc = train_model(
-        sparse_model, train_loader, test_loader,
-        "SparseIDM", DEVICE, EPOCHS, LR
-    )
-    results['SparseIDM'] = {'action_acc': sparse_action_acc, 'avg_acc': sparse_avg_acc}
-    
+    seeds = sample_seeds(NUM_SEEDS)
+    print(f"Random seeds: {seeds}")
+
+    results = {'DenseIDM': [], 'SparseIDM': []}
+
+    for seed in seeds:
+        print(f"\nRunning seed {seed}")
+        set_seed(seed)
+
+        train_loader, test_loader = get_dataloaders(TRAIN_DATA_PATH, TEST_DATA_PATH, BATCH_SIZE)
+        sample_batch = next(iter(train_loader))
+        frame_sample = sample_batch["frame"]  # 形状通常为 [B, T, H, W, 3]
+        grid_h, grid_w = frame_sample.shape[2], frame_sample.shape[3]
+
+        dense_model = DenseIDM(num_actions=NUM_ACTIONS)
+        dense_model, dense_action_acc, dense_avg_acc = train_model(
+            dense_model, train_loader, test_loader,
+            "DenseIDM", DEVICE, EPOCHS, LR
+        )
+        results['DenseIDM'].append({'seed': seed, 'action_acc': dense_action_acc, 'avg_acc': dense_avg_acc})
+
+        sparse_model = SparseIDM(grid_h=grid_h, grid_w=grid_w, num_actions=NUM_ACTIONS)
+        sparse_model, sparse_action_acc, sparse_avg_acc = train_model(
+            sparse_model, train_loader, test_loader,
+            "SparseIDM", DEVICE, EPOCHS, LR
+        )
+        results['SparseIDM'].append({'seed': seed, 'action_acc': sparse_action_acc, 'avg_acc': sparse_avg_acc})
+
+        del dense_model, sparse_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     # Print comparison results - interaction actions (3, 4, 5, 6) and average
     interaction_actions = [3, 4, 5, 6]  # Pickup, Drop, Toggle, Done
-    
+
     print(f"\n{'='*60}")
-    print("Comparison Results")
+    print(f"Comparison Results ({NUM_SEEDS} random seeds; mean ± std)")
     print(f"{'='*60}")
     print(f"{'Model':<15} {'Average':<12} {'Pickup':<12} {'Drop':<12} {'Toggle':<12} {'Done':<12}")
     print(f"{'-'*60}")
-    for model_name, result in results.items():
-        action_acc = result['action_acc']
-        # Calculate average only over interaction actions
-        interaction_accs = [action_acc[a] for a in interaction_actions]
-        avg_acc = np.mean(interaction_accs)
-        acc_str = f"{avg_acc*100:.2f}%"
-        action_strs = [f"{action_acc[a]*100:.2f}%" for a in interaction_actions]
+    for model_name, seed_results in results.items():
+        action_values = np.array([
+            [result['action_acc'][a] for a in interaction_actions]
+            for result in seed_results
+        ])
+        interaction_values = action_values.mean(axis=1)
+        acc_str = f"{interaction_values.mean()*100:.2f}±{interaction_values.std()*100:.2f}%"
+        action_strs = [
+            f"{action_values[:, i].mean()*100:.2f}±{action_values[:, i].std()*100:.2f}%"
+            for i in range(len(interaction_actions))
+        ]
         print(f"{model_name:<15} {acc_str:<12} " + " ".join(f"{s:<12}" for s in action_strs))
     print(f"{'='*60}")
 

@@ -45,7 +45,7 @@ def load_pretrained_world_model(model_path, obs_shape, num_actions):
     print("Pretrained model loaded successfully")
     return model
 
-def run_experiment(train_ratio, train_dataset, test_loader, obs_shape, num_actions, skip_world_model=False, skip_inverse_model=False):
+def run_experiment(train_ratio, train_dataset, test_loader, obs_shape, num_actions, skip_world_model=False, skip_inverse_model=True):
     """Run one experiment with given training data ratio."""
     print(f"\n{'='*80}")
     print(f"Experiment: Training data ratio = {train_ratio*100:.0f}%")
@@ -96,7 +96,8 @@ def run_experiment(train_ratio, train_dataset, test_loader, obs_shape, num_actio
         )
         print("\n--- Testing Inverse Model ---")
         inverse_model.eval()
-        oracle = MiniGridPhysicsOracle()
+        # These random-play datasets were collected with box color toggles.
+        oracle = MiniGridPhysicsOracle(box_toggle_mode="color_cycle")
         inverse_model_results = test_inverse_model(
             inverse_model,
             oracle,
@@ -220,4 +221,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

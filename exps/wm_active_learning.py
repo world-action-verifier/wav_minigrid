@@ -55,6 +55,12 @@ UNCERTAINTY_TEMPERATURE = WM_ACTIVE_LEARNING.get("UNCERTAINTY_TEMPERATURE", 0.8)
 UNCERTAINTY_USE_TOPK = WM_ACTIVE_LEARNING.get("UNCERTAINTY_USE_TOPK", False)
 UNCERTAINTY_N_SAMPLES = WM_ACTIVE_LEARNING.get("UNCERTAINTY_N_SAMPLES", 25)
 PROGRESS_RANDOM_MIX_RATIO = WM_ACTIVE_LEARNING.get("PROGRESS_RANDOM_MIX_RATIO", 0.0)
+RLIR_ACTION_LOSS = WM_ACTIVE_LEARNING["RLIR_ACTION_LOSS"]
+RLIR_SCORE_NORMALIZATION = WM_ACTIVE_LEARNING["RLIR_SCORE_NORMALIZATION"]
+RLIR_RANDOM_MIX_RATIO = WM_ACTIVE_LEARNING["RLIR_RANDOM_MIX_RATIO"]
+RLIR_TEMPERATURE = WM_ACTIVE_LEARNING["RLIR_TEMPERATURE"]
+RLIR_USE_TOPK = WM_ACTIVE_LEARNING["RLIR_USE_TOPK"]
+RLIR_ROUND_CARRIED = WM_ACTIVE_LEARNING["RLIR_ROUND_CARRIED"]
 SAVE_MODEL = "False"
 # Allow environment variable overrides
 if 'AL_STRATEGIES' in os.environ:
@@ -105,6 +111,8 @@ def run_active_learning():
     else:
         inverse_state_dict = inverse_checkpoint
     inverse_model.load_state_dict(inverse_state_dict, strict=False)
+    # Keep RLIR independent of WAV's per-round IDM fine-tuning and method order.
+    rlir_inverse_model = copy.deepcopy(inverse_model).eval() if "RLIR" in STRATEGIES else None
     
     dataset_size = len(full_dataset)
     all_permuted_indices = torch.randperm(dataset_size).tolist()
@@ -220,6 +228,13 @@ def run_active_learning():
                     uncertainty_use_topk=UNCERTAINTY_USE_TOPK,
                     progress_random_mix_ratio=PROGRESS_RANDOM_MIX_RATIO,
                     oracle_random_mix_ratio=ORACLE_RANDOM_MIX_RATIO,
+                    inverse_model=rlir_inverse_model,
+                    rlir_action_loss=RLIR_ACTION_LOSS,
+                    rlir_score_normalization=RLIR_SCORE_NORMALIZATION,
+                    rlir_random_mix_ratio=RLIR_RANDOM_MIX_RATIO,
+                    rlir_temperature=RLIR_TEMPERATURE,
+                    rlir_use_topk=RLIR_USE_TOPK,
+                    rlir_round_carried=RLIR_ROUND_CARRIED,
                     round_idx=round_idx,
                     prev_losses_map=prev_losses_map,
                     model_old=model_old,

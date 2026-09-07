@@ -141,6 +141,161 @@ def compute_uncertainty_for_pool(
         n_samples=n_samples,
     )
 
+def compute_rlir_scores_for_pool(
+    world_model,
+    inverse_model,
+    dataset,
+    pool_indices: Sequence[int],
+    batch_size: int,
+    device: torch.device,
+    action_loss: str = "cross_entropy",
+    round_carried: bool = True,
+    seed: int = None,
+) -> np.ndarray:
+    """Compute the RLIR action-reconstruction score for every pool sample.
+
+    RLIR forms the cycle
+
+        (s_t, a_t) --world model--> predicted s_{t+1}
+        (s_t, predicted s_{t+1}) --inverse model--> predicted a_t
+
+    and scores a sample by how poorly the inverse model reconstructs the
+    ground-truth action.  Actions are categorical in MiniGrid, so categorical
+    cross entropy is the default; numeric MSE between action IDs would impose a
+    distance between labels that does not exist.
+    """
+    if inverse_model is None:
+        raise ValueError("RLIR requires a trained inverse_model.")
+
+    valid_losses = {"cross_entropy", "one_minus_probability", "margin"}
+    if action_loss not in valid_losses:
+        raise ValueError(
+            f"Unknown RLIR action_loss {action_loss!r}; expected one of {sorted(valid_losses)}."
+        )
+
+    pool_indices = list(pool_indices)
+    if not pool_indices:
+        return np.empty(0, dtype=np.float32)
+
+    device_t = torch.device(device) if not isinstance(device, torch.device) else device
+    # SparseIDM's hard Gumbel mask remains stochastic in eval mode.
+    # Seed it explicitly so that an RLIR round is reproducible.
+    if seed is not None:
+        torch.manual_seed(int(seed))
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(int(seed))
+    loader = DataLoader(Subset(dataset, pool_indices), batch_size=batch_size, shuffle=False)
+    scores: List[float] = []
+    world_was_training = world_model.training
+    inverse_was_training = inverse_model.training
+    world_model.eval()
+    inverse_model.eval()
+
+    try:
+        with torch.no_grad():
+            for batch in loader:
+                frames = batch["frame"].to(device_t)
+                carried_col = batch["carried_col"].to(device_t)
+                carried_obj = batch["carried_obj"].to(device_t)
+                actions = batch["action"].to(device_t).long().reshape(-1)
+
+                curr_frame = frames[:, 0].float()
+                curr_col = carried_col[:, 0].float()
+                curr_obj = carried_obj[:, 0].float()
+                current_state = {
+                    "frame": curr_frame,
+                    "carried_col": curr_col,
+                    "carried_obj": curr_obj,
+                }
+
+                # Predict s_{t+1} from the pool's initial state and true action.
+                wm_out = world_model(
+                    current_state,
+                    mode="predict_with_action",
+                    gt_actions=actions,
+                )
+                pred_frame = torch.stack(
+                    [
+                        torch.argmax(wm_out["logits_obj"], dim=1),
+                        torch.argmax(wm_out["logits_col"], dim=1),
+                        torch.argmax(wm_out["logits_state"], dim=1),
+                    ],
+                    dim=-1,
+                ).float()
+                pred_col = wm_out["carried_col"].float()
+                pred_obj = wm_out["carried_obj"].float()
+                if round_carried:
+                    pred_col = torch.round(pred_col)
+                    pred_obj = torch.round(pred_obj)
+
+                inverse_inputs = {
+                    "frame": torch.stack([curr_frame, pred_frame], dim=0),
+                    "carried_col": torch.stack([curr_col, pred_col], dim=0),
+                    "carried_obj": torch.stack([curr_obj, pred_obj], dim=0),
+                }
+                inverse_out = inverse_model(inverse_inputs)
+                action_logits = inverse_out[0] if isinstance(inverse_out, tuple) else inverse_out
+
+                if action_logits.ndim != 2 or action_logits.shape[0] != actions.shape[0]:
+                    raise ValueError(
+                        "Inverse model must return action logits shaped [batch, num_actions], "
+                        f"got {tuple(action_logits.shape)}."
+                    )
+
+                if action_loss == "cross_entropy":
+                    batch_scores = F.cross_entropy(action_logits, actions, reduction="none")
+                else:
+                    action_probs = F.softmax(action_logits, dim=1)
+                    gt_probs = action_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
+                    if action_loss == "one_minus_probability":
+                        batch_scores = 1.0 - gt_probs
+                    else:
+                        masked_probs = action_probs.scatter(
+                            1, actions.unsqueeze(1), float("-inf")
+                        )
+                        best_wrong_probs = masked_probs.max(dim=1).values
+                        batch_scores = best_wrong_probs - gt_probs
+
+                scores.extend(batch_scores.detach().cpu().numpy().tolist())
+    finally:
+        world_model.train(world_was_training)
+        inverse_model.train(inverse_was_training)
+
+    return np.asarray(scores, dtype=np.float32)
+
+
+def normalize_rlir_scores_by_action(
+    scores: np.ndarray,
+    actions: np.ndarray,
+    method: str,
+) -> np.ndarray:
+    """Remove inverse-model confidence offsets between MiniGrid action classes."""
+    if method == "none":
+        return scores
+    if method not in {"action_zscore", "action_percentile"}:
+        raise ValueError(
+            "Unknown RLIR score normalization "
+            f"{method!r}; expected 'none', 'action_zscore', or 'action_percentile'."
+        )
+
+    normalized = np.empty_like(scores, dtype=np.float32)
+    for action in np.unique(actions):
+        local_indices = np.flatnonzero(actions == action)
+        local_scores = scores[local_indices]
+        if method == "action_zscore":
+            std = float(local_scores.std())
+            normalized[local_indices] = (
+                (local_scores - float(local_scores.mean())) / max(std, 1e-6)
+            )
+        else:
+            order = np.argsort(local_scores, kind="stable")
+            percentiles = np.linspace(
+                0.0, 1.0, num=len(local_indices), endpoint=True, dtype=np.float32
+            )
+            normalized[local_indices[order]] = percentiles
+    return normalized
+
+
 def compute_uncertainty_via_mcdropout(model, dataset, pool_indices, batch_size, seed=None, n_samples=10):
     """
     Compute per-sample uncertainty via MC Dropout.
@@ -291,6 +446,13 @@ def query_strategy(
     uncertainty_use_topk: bool = False,
     progress_random_mix_ratio: float = 0.0,
     oracle_random_mix_ratio: float = 0.0,
+    inverse_model=None,
+    rlir_action_loss: str = "cross_entropy",
+    rlir_score_normalization: str = "none",
+    rlir_random_mix_ratio: float = 0.0,
+    rlir_temperature: float = 0.5,
+    rlir_use_topk: bool = True,
+    rlir_round_carried: bool = True,
     round_idx: int = None,
     prev_losses_map: Dict[int, float] = None,
     model_old=None,
@@ -308,6 +470,85 @@ def query_strategy(
 
     if strategy_name == "Random":
         selected = np.random.choice(pool_indices, size=n_select, replace=False).tolist()
+        return selected, {}, {}
+
+    if strategy_name == "RLIR":
+        rlir_round_seed = (
+            int(seed) + 6151 + (7919 * int(round_idx))
+            if round_idx is not None
+            else int(seed) + 6151
+        )
+        scores = compute_rlir_scores_for_pool(
+            world_model=model,
+            inverse_model=inverse_model,
+            dataset=dataset,
+            pool_indices=pool_indices,
+            batch_size=batch_size,
+            device=device,
+            action_loss=rlir_action_loss,
+            round_carried=rlir_round_carried,
+            seed=rlir_round_seed,
+        )
+        if hasattr(dataset, "actions"):
+            pool_actions = dataset.actions[pool_indices]
+            if torch.is_tensor(pool_actions):
+                pool_actions = pool_actions.detach().cpu().numpy()
+            pool_actions = np.asarray(pool_actions).reshape(-1)
+        else:
+            pool_actions_list = []
+            for idx in pool_indices:
+                action = dataset[idx]["action"]
+                pool_actions_list.append(
+                    int(action.item() if torch.is_tensor(action) else action)
+                )
+            pool_actions = np.asarray(pool_actions_list, dtype=np.int64)
+        scores = normalize_rlir_scores_by_action(
+            scores,
+            pool_actions,
+            method=rlir_score_normalization,
+        )
+        rng_rlir = np.random.RandomState(rlir_round_seed)
+        mix_ratio = float(np.clip(rlir_random_mix_ratio, 0.0, 1.0))
+        n_rand = max(0, min(n_select, int(round(n_select * mix_ratio))))
+        n_rlir = n_select - n_rand
+        selected: List[int] = []
+        remaining_local = list(range(len(pool_indices)))
+
+        if n_rand > 0:
+            rand_local = rng_rlir.choice(len(pool_indices), size=n_rand, replace=False)
+            selected.extend(pool_indices[i] for i in rand_local)
+            picked = set(rand_local.tolist())
+            remaining_local = [i for i in remaining_local if i not in picked]
+
+        if n_rlir <= 0:
+            return selected, {}, {}
+
+        remaining_scores = scores[remaining_local]
+        # Stable index tie-break makes top-k runs exactly reproducible.
+        if rlir_use_topk:
+            ranked = sorted(
+                ((float(scores[i]), pool_indices[i]) for i in remaining_local),
+                key=lambda item: (-item[0], item[1]),
+            )
+            selected.extend(idx for _, idx in ranked[:n_rlir])
+        else:
+            score_min = float(np.min(remaining_scores))
+            score_max = float(np.max(remaining_scores))
+            if score_max - score_min > 1e-6:
+                normalized = (remaining_scores - score_min) / (score_max - score_min)
+            else:
+                normalized = np.zeros_like(remaining_scores)
+            temperature = max(float(rlir_temperature), 1e-6)
+            weights = np.exp(normalized / temperature)
+            probabilities = weights / weights.sum()
+            picked_positions = rng_rlir.choice(
+                len(remaining_local),
+                size=n_rlir,
+                replace=False,
+                p=probabilities,
+            )
+            selected.extend(pool_indices[remaining_local[i]] for i in picked_positions)
+
         return selected, {}, {}
 
     if strategy_name in {"Hard-Oracle", "Simple-Oracle", "Uniform-Oracle"}:
@@ -562,7 +803,8 @@ def select_and_collect_consistency_data(
 
     # Local import to keep this module lightweight.
     if data_mode == "oracle":
-        oracle = MiniGridPhysicsOracle()
+        # Active-learning data uses one-way deposits into initially empty boxes.
+        oracle = MiniGridPhysicsOracle(box_toggle_mode="deposit")
     else:
         oracle = None
 
@@ -828,4 +1070,3 @@ def train_one_round(
 
             epoch_loss += float(loss.item())
             batch_count += 1
-

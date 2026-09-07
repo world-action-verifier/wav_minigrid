@@ -53,7 +53,7 @@ DATA_EFFICIENCY_GAP = {
     ),
     "BATCH_SIZE": 64,
     "LR": 1e-3,
-    "EPOCHS": 200,
+    "EPOCHS": 500,
     "INVERSE_MODEL_EPOCHS": 300,
     "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
     "TARGET_PIXELS": 4.0,
@@ -226,7 +226,7 @@ WM_ACTIVE_LEARNING = {
     "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
     "NUMS_SAMPLES_PER_STATE": 1,
     "CONSISTENCY_MODE": "oracle",  # "oracle" or "model"
-    "STRATEGIES": ["Random", "Hard-Oracle", "Uncertainty", "Progress", "WAV"],
+    "STRATEGIES": ["Random", "Hard-Oracle", "Uncertainty", "Progress", "RLIR", "WAV"],
     "PROGRESS_GAMMA": 0.1,
     "PROGRESS_RANDOM_MIX_RATIO": 0.3,
     "ORACLE_RANDOM_MIX_RATIO": 0.3,
@@ -234,10 +234,16 @@ WM_ACTIVE_LEARNING = {
     "UNCERTAINTY_TEMPERATURE": 0.5,
     "UNCERTAINTY_USE_TOPK": True,
     "UNCERTAINTY_N_SAMPLES": 5,
+    "RLIR_ACTION_LOSS": "cross_entropy",  # cross_entropy | one_minus_probability | margin
+    "RLIR_SCORE_NORMALIZATION": "action_zscore",  # none | action_zscore | action_percentile
+    "RLIR_RANDOM_MIX_RATIO": 0.3,
+    "RLIR_TEMPERATURE": 0.5,  # used only when RLIR_USE_TOPK=False
+    "RLIR_USE_TOPK": True,
+    "RLIR_ROUND_CARRIED": True,
     "USE_BASE_DATA": True,
     "USE_RANDOM_BASE_MODEL": True,
     "TRAIN_FROM_SCRATCH": False,
-    "SEED": 48,
+    "SEED": 47,
 }
 
 # ============================================================================

@@ -8,7 +8,15 @@ import numpy as np
 class MiniGridPhysicsOracle:
     """Lightweight physics simulator for MiniGrid environment."""
     
-    def __init__(self):
+    BOX_TOGGLE_MODES = frozenset({'deposit', 'color_cycle'})
+
+    def __init__(self, box_toggle_mode='deposit'):
+        if box_toggle_mode not in self.BOX_TOGGLE_MODES:
+            raise ValueError(
+                f"Unknown oracle box toggle mode {box_toggle_mode!r}; "
+                f"expected one of {sorted(self.BOX_TOGGLE_MODES)}"
+            )
+        self.box_toggle_mode = box_toggle_mode
         self.OBJECT_TO_IDX = {
             'empty': 1, 'wall': 2, 'floor': 3, 'door': 4, 'key': 5, 
             'ball': 6, 'box': 7, 'goal': 8, 'lava': 9, 'agent': 10
@@ -107,8 +115,14 @@ class MiniGridPhysicsOracle:
         # Action 5: Toggle
         elif action == 5:
             if front_obj == self.OBJECT_TO_IDX['box']:
-                next_c_obj = self.OBJECT_TO_IDX['empty']
-                next_c_col = 5
+                if self.box_toggle_mode == 'deposit':
+                    if next_c_obj != self.OBJECT_TO_IDX['empty']:
+                        next_c_obj = self.OBJECT_TO_IDX['empty']
+                        next_c_col = self.CARRIED_EMPTY_COL
+                elif front_col == self.COLOR_TO_IDX['red']:
+                    next_frame[f_r, f_c, 1] = self.COLOR_TO_IDX['blue']
+                else:
+                    next_frame[f_r, f_c, 1] = self.COLOR_TO_IDX['red']
             elif front_obj in [self.OBJECT_TO_IDX['key'], self.OBJECT_TO_IDX['ball']]:
                 if next_frame[f_r, f_c, 1] == self.COLOR_TO_IDX['red']:
                     next_frame[f_r, f_c, 1] = self.COLOR_TO_IDX['blue']
@@ -143,4 +157,3 @@ class MiniGridPhysicsOracle:
                 next_c_col = col_to_hand
 
         return next_frame, next_c_col, next_c_obj
-

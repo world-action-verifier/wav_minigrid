@@ -68,9 +68,17 @@ class IBall(WorldObj):
         fill_coords(img, point_in_circle(0.5, 0.5, 0.31), COLORS[self.color])
 
 class IBox(WorldObj):
-    def __init__(self, color, contains=None):
+    TOGGLE_MODES = frozenset({'deposit', 'exchange', 'color_cycle'})
+
+    def __init__(self, color, contains=None, toggle_mode='exchange'):
+        if toggle_mode not in self.TOGGLE_MODES:
+            raise ValueError(
+                f"Unknown box toggle mode {toggle_mode!r}; "
+                f"expected one of {sorted(self.TOGGLE_MODES)}"
+            )
         super(IBox, self).__init__('box', color)
         self.contains = contains
+        self.toggle_mode = toggle_mode
 
     def can_pickup(self):
         return True
@@ -82,35 +90,24 @@ class IBox(WorldObj):
         fill_coords(img, point_in_rect(0.16, 0.84, 0.47, 0.53), c)
 
     def toggle(self, env, pos):
-        """
-        Implement swap logic:
-        1. Temporarily store what the Agent is holding (env.carrying)
-        2. Replace what the Agent is holding with what's in the Box (self.contains)
-        3. Replace what's in the Box with what was temporarily stored
-        """
-        obj_in_hand = env.carrying
-        obj_in_box = self.contains
-
-        env.carrying = obj_in_box
-        self.contains = obj_in_hand
-
-        if env.carrying is not None:
-            env.carrying.cur_pos = np.array([-1, -1])
+        """Apply the configured deposit, exchange, or color-cycle behavior."""
+        if self.toggle_mode == 'deposit':
+            if env.carrying is not None:
+                self.contains = env.carrying
+                self.contains.cur_pos = np.array([-1, -1])
+                env.carrying = None
+        elif self.toggle_mode == 'exchange':
+            env.carrying, self.contains = self.contains, env.carrying
+            if env.carrying is not None:
+                env.carrying.cur_pos = np.array([-1, -1])
+        else:
+            if self.color in COLOR_CYCLE:
+                current_idx = COLOR_CYCLE.index(self.color)
+                self.color = COLOR_CYCLE[(current_idx + 1) % len(COLOR_CYCLE)]
+            else:
+                self.color = COLOR_CYCLE[0]
 
         return True
-    
-    # Color Change (Use this toggle logic when collecting random playing data)
-    # def toggle(self, env, pos):
-    #     """
-    #     Color change logic: cycle through colors in COLOR_CYCLE order
-    #     """
-    #     if self.color in COLOR_CYCLE:
-    #         current_idx = COLOR_CYCLE.index(self.color)
-    #         next_idx = (current_idx + 1) % len(COLOR_CYCLE)
-    #         self.color = COLOR_CYCLE[next_idx]
-    #     else:
-    #         self.color = COLOR_CYCLE[0]
-    #     return True
 
 
 class NoiseFloor(WorldObj):

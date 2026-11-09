@@ -208,7 +208,7 @@ WM_ACTIVE_LEARNING = {
         "checkpoints", 
         "pretrained_video_model.pth"
     ),
-    "SAVE_DIR": None,  # Will be set relative to project_root in the script
+    "SAVE_DIR": os.path.join(MINIGRID_DIR, "outputs", "active_learning_balanced"),
     "LOG_FILE": "active_learning_results.csv",
     "TEST_SET_PATH": os.path.join(
         MINIGRID_DIR, 
@@ -220,7 +220,7 @@ WM_ACTIVE_LEARNING = {
     "EPOCHS_FIRST_ROUND": 300,
     "EPOCHS_PER_ROUND": 300,
     "INVERSE_MODEL_EPOCHS_PER_ROUND": 50,
-    "NUM_ROUNDS": 2,
+    "NUM_ROUNDS": 5,  # Aggregate rounds 1–5; round 0 is only the initial evaluation.
     "ADD_COUNT_FIRST_ROUND": 100,
     "ADD_COUNT_PER_ROUND": 100,
     "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
@@ -240,33 +240,37 @@ WM_ACTIVE_LEARNING = {
     "RLIR_TEMPERATURE": 0.5,  # used only when RLIR_USE_TOPK=False
     "RLIR_USE_TOPK": True,
     "RLIR_ROUND_CARRIED": True,
+    # Match the balanced-test experiment: update RLIR's IDM on cumulative labels.
+    "RLIR_UPDATE_IDM": True,
     "USE_BASE_DATA": True,
     "USE_RANDOM_BASE_MODEL": True,
     "TRAIN_FROM_SCRATCH": False,
-    "SEED": 47,
+    "SEED": 52,  # Default for a single imported run / AL_SEED override.
+    "SEEDS": list(range(52, 57)),  # Five paired seeds shared by all acquisition strategies.
+    "CPU_THREADS": 1,
 }
 
 # ============================================================================
-# World Model Action Following Score (AFS) evaluation (exps/afs_test.py)
+# Multi-round AFS benchmark (exps/afs_active_learning.py)
 # ============================================================================
-WM_AFS_EVAL = {
-    "CHECKPOINT_DIR": os.path.join(
-        MINIGRID_DIR, "checkpoints", "afs_test_checkpoints"
-    ),
-    "CHECKPOINT_PATTERN": (
-        r"wm_(WAV|Progress|Hard-Oracle|Random|Uncertainty)_afs_test\.pth"
-    ),
-    "TEST_SET_PATH": os.path.join(
-        MINIGRID_DIR,
-        "data",
-        "MiniGrid-Empty-Interact-6x6-o3-test-v0_MultiTaskPolicy_policy_OOD_test_set.npz",
-    ),
-    "NUM_SAMPLES": 200,
-    "SEED": 49,
-    "OUTPUT_JSON": "wm_afs_results.json",
-    "ACTION_MODE": "fixed_interact", 
-    "ACTIONS": "3,5,6",
-    "REQUIRED_EXECUTABLE_ACTIONS": "3,5,6",
-    "ACTION_FOLLOWING_TOL": 0.0,
+# pool_p05.npz: 12,000 transitions, 5% from AFS-eligible states.
+# confirmation_states.npz: 174 evaluation states, actions 3/5/6.
+WM_AFS_ACTIVE_LEARNING = {
+    **{key: value for key, value in WM_ACTIVE_LEARNING.items() if key != "TEST_SET_PATH"},
+    "DATA_PATH": os.path.join(MINIGRID_DIR, "data", "pool_p05.npz"),
+    "AFS_STATES_PATH": os.path.join(MINIGRID_DIR, "data", "confirmation_states.npz"),
+    "AFS_ACTIONS": [3, 5, 6],
+    "SAVE_DIR": os.path.join(MINIGRID_DIR, "outputs", "afs_active_learning"),
+    "NUM_ROUNDS": 9,
+    "ADD_COUNT_FIRST_ROUND": 30,
+    "ADD_COUNT_PER_ROUND": 30,
+    "EPOCHS_FIRST_ROUND": 300,
+    "EPOCHS_PER_ROUND": 300,
+    "INVERSE_MODEL_EPOCHS_PER_ROUND": 50,
+    "RLIR_UPDATE_IDM": True,
+    "STRATEGIES": ["Random", "Hard-Oracle", "Uncertainty", "Progress", "RLIR-updated-IDM", "WAV"],
+    "SEED": 201,
+    "SEEDS": list(range(201, 206)),
+    "DEVICE": str(DEVICE),
 }
 

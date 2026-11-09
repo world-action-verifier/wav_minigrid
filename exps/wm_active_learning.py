@@ -1,3 +1,13 @@
+"""Compare active-learning methods using prediction loss.
+
+Usage:
+    python exps/wm_active_learning.py
+
+Configure paths via `WM_ACTIVE_LEARNING` in `wav_minigrid.config`.
+Reports per-round losses and mean ± SD across seeds (excluding round 0).
+"""
+
+
 import torch
 from torch.utils.data import DataLoader, ConcatDataset
 import numpy as np
@@ -6,8 +16,8 @@ import copy
 import csv
 import json
 import sys
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, project_root)
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(project_root, 'src'))
 
 from wav_minigrid.models import WorldModel, SparseIDM
 from wav_minigrid.dataset import MiniGridDynamicsDataset, PseudoLabeledSubset, NormalizedDataset, MemoryDynamicsDataset
@@ -23,15 +33,20 @@ from wav_minigrid.al_utils import (
 )
 from wav_minigrid.config import WM_ACTIVE_LEARNING, DEVICE
 
+# Workers use the configuration saved by the launcher.
+if os.environ.get('AL_WORKER') == '1':
+    with open(os.environ['AL_CONFIG_PATH']) as f:
+        WM_ACTIVE_LEARNING = json.load(f)
+
 # Configuration
 DATA_PATH = WM_ACTIVE_LEARNING["DATA_PATH"]
 BASE_DATA_PATH = WM_ACTIVE_LEARNING["BASE_DATA_PATH"]
 STAGE1_CKPT = WM_ACTIVE_LEARNING["STAGE1_CKPT"]
 INVERSE_MODEL_PATH = WM_ACTIVE_LEARNING["INVERSE_MODEL_PATH"]
 VIDEO_STAGE1_CKPT = WM_ACTIVE_LEARNING["VIDEO_STAGE1_CKPT"]
-SAVE_DIR = os.path.join(project_root, "checkpoints/stage2_active_learning")
+SAVE_DIR = os.environ.get('AL_OUTPUT_DIR', WM_ACTIVE_LEARNING["SAVE_DIR"])
 LOG_FILE = WM_ACTIVE_LEARNING["LOG_FILE"]
-TEST_SET_PATH = WM_ACTIVE_LEARNING["TEST_SET_PATH"]
+TEST_SET_PATH = WM_ACTIVE_LEARNING.get("TEST_SET_PATH")
 BATCH_SIZE = WM_ACTIVE_LEARNING["BATCH_SIZE"]
 LR = WM_ACTIVE_LEARNING["LR"]
 EPOCHS_FIRST_ROUND = WM_ACTIVE_LEARNING["EPOCHS_FIRST_ROUND"]
@@ -43,7 +58,7 @@ ADD_COUNT_PER_ROUND = WM_ACTIVE_LEARNING["ADD_COUNT_PER_ROUND"]
 FORWARD_CARRIED_LOSS_WEIGHT = WM_ACTIVE_LEARNING["FORWARD_CARRIED_LOSS_WEIGHT"]
 NUMS_SAMPLES_PER_STATE = WM_ACTIVE_LEARNING["NUMS_SAMPLES_PER_STATE"]
 CONSISTENCY_MODE = WM_ACTIVE_LEARNING["CONSISTENCY_MODE"]
-STRATEGIES = WM_ACTIVE_LEARNING["STRATEGIES"].copy()  # Make a copy to allow modification
+STRATEGIES = WM_ACTIVE_LEARNING["STRATEGIES"].copy()
 USE_BASE_DATA = WM_ACTIVE_LEARNING["USE_BASE_DATA"]
 USE_RANDOM_BASE_MODEL = WM_ACTIVE_LEARNING["USE_RANDOM_BASE_MODEL"]
 TRAIN_FROM_SCRATCH = WM_ACTIVE_LEARNING["TRAIN_FROM_SCRATCH"]
@@ -61,14 +76,13 @@ RLIR_RANDOM_MIX_RATIO = WM_ACTIVE_LEARNING["RLIR_RANDOM_MIX_RATIO"]
 RLIR_TEMPERATURE = WM_ACTIVE_LEARNING["RLIR_TEMPERATURE"]
 RLIR_USE_TOPK = WM_ACTIVE_LEARNING["RLIR_USE_TOPK"]
 RLIR_ROUND_CARRIED = WM_ACTIVE_LEARNING["RLIR_ROUND_CARRIED"]
+RLIR_UPDATE_IDM = WM_ACTIVE_LEARNING.get("RLIR_UPDATE_IDM", True)
 SAVE_MODEL = "False"
 # Allow environment variable overrides
 if 'AL_STRATEGIES' in os.environ:
     STRATEGIES = os.environ['AL_STRATEGIES'].split(',')
 if 'AL_SEED' in os.environ:
     SEED = int(os.environ['AL_SEED'])
-
-set_all_seeds(SEED)
 
 def load_stage1_model(model_path, obs_shape, num_actions):
     """Load stage-1 world model checkpoint."""
@@ -94,7 +108,13 @@ def load_stage1_model(model_path, obs_shape, num_actions):
 
  
 
-def run_active_learning():
+def run_active_learning(*, evaluate_prediction_loss=True, on_round_end=None):
+    """Train each round; optionally evaluate loss and call a checkpoint callback.
+
+    on_round_end(model, strategy, round_idx, labeled_size) is also called at
+    round 0. AFS disables prediction-loss evaluation and saves models here.
+    """
+    set_all_seeds(SEED)
     os.makedirs(SAVE_DIR, exist_ok=True)
     
     full_dataset = MiniGridDynamicsDataset(DATA_PATH)
@@ -111,7 +131,7 @@ def run_active_learning():
     else:
         inverse_state_dict = inverse_checkpoint
     inverse_model.load_state_dict(inverse_state_dict, strict=False)
-    # Keep RLIR independent of WAV's per-round IDM fine-tuning and method order.
+    # RLIR and WAV maintain separate IDMs.
     rlir_inverse_model = copy.deepcopy(inverse_model).eval() if "RLIR" in STRATEGIES else None
     
     dataset_size = len(full_dataset)
@@ -119,18 +139,46 @@ def run_active_learning():
     pool_indices_full = all_permuted_indices
     print(f"Pool Size: {len(pool_indices_full)}")
     
-    print(f"Loading test set from: {TEST_SET_PATH}")
-    test_dataset = MiniGridDynamicsDataset(TEST_SET_PATH)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader = None
+    if evaluate_prediction_loss:
+        if TEST_SET_PATH is None:
+            raise ValueError("TEST_SET_PATH is required for prediction-loss evaluation.")
+        print(f"Loading test set from: {TEST_SET_PATH}")
+        test_dataset = MiniGridDynamicsDataset(TEST_SET_PATH)
+        test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+        print(f"Test Size: {len(test_dataset)}")
     
     train_pool_indices = pool_indices_full
-    print(f"AL Pool Size: {len(train_pool_indices)} | Test Size: {len(test_dataset)}")
+    print(f"AL Pool Size: {len(train_pool_indices)}")
     
     with open(os.path.join(SAVE_DIR, LOG_FILE), 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Strategy', 'Round', 'Labeled_Size', 'Test_MSE'])
+        # Legacy column name: grid CE + weighted carried-state MSE, not pure MSE.
+        writer.writerow(['Strategy', 'Round', 'Labeled_Size'] +
+                        (['Test_MSE'] if evaluate_prediction_loss else []))
     
     all_results = {}
+
+    def record_round(model, strategy, round_idx, labeled_size):
+        model.eval()
+        result = dict(round=round_idx, labeled=labeled_size)
+        row = [strategy, round_idx, labeled_size]
+        if evaluate_prediction_loss:
+            metrics = evaluate(
+                model, test_loader, device=DEVICE,
+                forward_carried_loss_weight=FORWARD_CARRIED_LOSS_WEIGHT,
+                use_random_base_model=USE_RANDOM_BASE_MODEL,
+                is_round_0=(round_idx == 0),
+            )
+            result['mse'] = metrics['mse']
+            row.append(metrics['mse'])
+            print(f"Round {round_idx} Eval: MSE={metrics['mse']:.5f}")
+        all_results[strategy].append(result)
+        with open(os.path.join(SAVE_DIR, LOG_FILE), 'a', newline='') as f:
+            csv.writer(f).writerow(row)
+        if on_round_end is not None:
+            on_round_end(model, strategy, round_idx, labeled_size)
+
     for strategy in STRATEGIES:
         print(f"\n=================== Strategy: {strategy} ===================")
         
@@ -152,25 +200,8 @@ def run_active_learning():
         if strategy == "Progress" and NUM_ROUNDS >= 2:
             model_old = copy.deepcopy(model).to(DEVICE)
 
-        metrics = evaluate(
-            model,
-            test_loader,
-            device=DEVICE,
-            forward_carried_loss_weight=FORWARD_CARRIED_LOSS_WEIGHT,
-            use_random_base_model=USE_RANDOM_BASE_MODEL,
-            is_round_0=True,
-        )
-        print(f"[Round 0] MSE: {metrics['mse']:.4f}")
-        
-        all_results[strategy] = [{
-            'round': 0,
-            'labeled': len(current_labeled),
-            'mse': metrics['mse'],
-        }]
-        
-        with open(os.path.join(SAVE_DIR, LOG_FILE), 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([strategy, 0, len(current_labeled), metrics['mse']])
+        all_results[strategy] = []
+        record_round(model, strategy, 0, len(current_labeled))
         
         for round_idx in range(1, NUM_ROUNDS + 1):
             n_select = ADD_COUNT_FIRST_ROUND if round_idx == 1 else ADD_COUNT_PER_ROUND
@@ -273,6 +304,15 @@ def run_active_learning():
                     inverse_train_loader, 7, INVERSE_MODEL_EPOCHS_PER_ROUND,
                     LR, DEVICE, SparseIDM, model=inverse_model,
                 )
+            elif strategy == "RLIR" and RLIR_UPDATE_IDM:
+                inverse_train_loader = DataLoader(
+                    train_dataset, batch_size=BATCH_SIZE, shuffle=True
+                )
+                print(f"Round {round_idx}: Fine-tuning RLIR inverse model for {INVERSE_MODEL_EPOCHS_PER_ROUND} epochs")
+                rlir_inverse_model = train_inverse_model(
+                    inverse_train_loader, 7, INVERSE_MODEL_EPOCHS_PER_ROUND,
+                    LR, DEVICE, SparseIDM, model=rlir_inverse_model,
+                )
             
             train_one_round(
                 model,
@@ -287,24 +327,7 @@ def run_active_learning():
             if strategy == "Progress" and model_old is not None:
                 ema_gamma_progress_update_old(model_old, model, PROGRESS_GAMMA)
             
-            metrics = evaluate(
-                model,
-                test_loader,
-                device=DEVICE,
-                forward_carried_loss_weight=FORWARD_CARRIED_LOSS_WEIGHT,
-                use_random_base_model=USE_RANDOM_BASE_MODEL,
-            )
-            print(f"Round {round_idx} Eval: MSE={metrics['mse']:.5f}")
-            
-            with open(os.path.join(SAVE_DIR, LOG_FILE), 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([strategy, round_idx, len(current_labeled), metrics['mse']])
-            
-            all_results[strategy].append({
-                'round': round_idx,
-                'labeled': len(current_labeled),
-                'mse': metrics['mse'],
-            })
+            record_round(model, strategy, round_idx, len(current_labeled))
 
         # Save the final-round world model checkpoint for each strategy.
         if SAVE_MODEL == "True":
@@ -330,11 +353,17 @@ def run_active_learning():
     for strategy, results in all_results.items():
         print(f"\n>>> Strategy: {strategy}")
         for r in results:
+            loss_text = f" | MSE {r['mse']:.5f}" if 'mse' in r else ''
             print(
                 f"  Round {r['round']:>2d} | "
-                f"Labeled {r['labeled']:>5d} | "
-                f"MSE {r['mse']:.5f}"
+                f"Labeled {r['labeled']:>5d}{loss_text}"
             )
 
 if __name__ == "__main__":
-    run_active_learning()
+    if os.environ.get('AL_WORKER') == '1':
+        torch.set_num_threads(WM_ACTIVE_LEARNING["CPU_THREADS"])
+        torch.set_num_interop_threads(WM_ACTIVE_LEARNING["CPU_THREADS"])
+        run_active_learning()
+    else:
+        from wav_minigrid.al_experiment import run_experiments
+        run_experiments(__file__, WM_ACTIVE_LEARNING)

@@ -28,6 +28,7 @@ This repository contains the code for evaluating:
 * Robustness under increasing state complexity
 * Robustness under environmental noise
 * Active acquisition strategy comparison
+* Action following score comparison
 
 ## 🛠️ Installation 
 
@@ -188,13 +189,32 @@ python exps/noise_robustness.py
 Compare acquisition strategies for improving world model performance.
 
 ```bash
-python exps/wm_active_learning.py
+python exps/wm_active_learning.py --seeds 52
 ```
+
+This example runs a single seed for a quick check. Omit `--seeds 52` to run the default five-seed evaluation.
 
 **This experiment evaluates:**
 
-* Different data acquisition strategies
-* Performance gains under limited labeling budget
+* Prediction loss across six strategies, with 100 new samples per round
+* Rounds 1–5 averaged per seed; full evaluation reports five-seed mean ± sample SD
+
+---
+
+### 6. Action Following Score (AFS)
+
+Evaluate action-dependent predictions of world models trained with different acquisition strategies.
+
+```bash
+python exps/afs_active_learning.py --seeds 201
+```
+
+This example runs a single seed for a quick check. Omit `--seeds 201` to run the default five-seed evaluation.
+
+**This experiment evaluates:**
+
+* Strict-pair AFS for pickup, toggle, and swap, with 30 new samples per round
+* Rounds 1–9 averaged per seed; full evaluation reports five-seed mean ± sample SD
 
 ---
 
@@ -215,7 +235,7 @@ Key Findings:
 * **Complexity Scaling**: Sparse IDM demonstrate stable performance as environment complexity increases
 * **Noise Robustness**: Sparse IDM remains robust under increasing environmental noise
 * **Active Learning**: WAV's acquisition strategy leads to more efficient data utilization
-* **Active Following**: WAV consistently achieves higher action following scores 
+* **Action Following**: WAV consistently achieves higher action following scores
 
 ## 📂 Project Structure
 
@@ -233,6 +253,7 @@ WAV-MiniGrid/
 │   ├── state_complexity_gap.py
 │   ├── noise_robustness.py
 │   ├── wm_active_learning.py
+│   ├── afs_active_learning.py
 │   ├── train
 ├── requirements.txt
 ├── setup.py

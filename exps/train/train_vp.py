@@ -1,189 +1,124 @@
 #!/usr/bin/env python3
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-import os
-import csv
+"""
+Train the video model from state transitions without action labels.
+"""
 import argparse
-from tqdm import tqdm
-import wandb
+import copy
+import hashlib
+import json
+import math
+import random
 import sys
+from pathlib import Path
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
-from wav_minigrid.models.wm import WorldModel
-from train_utils import (
-    compute_loss_vp, 
-    evaluate, 
-    get_dataloaders,
-    prepare_batch_inputs,
-    load_model_checkpoint,
-    create_warmup_cosine_scheduler,
-)
-from config import DEVICE, VIDEO_TRAINING
+import numpy as np
+import torch
 
-print(f"Using device: {DEVICE}")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from wav_minigrid.models import WorldModel
+try:
+    from .config import DEVICE, VIDEO_TRAINING
+    from .train_utils import (set_all_seeds, load_video_pairs, video_observations,
+                              video_all_codes, video_matching_loss, video_pair_losses)
+except ImportError:
+    from config import DEVICE, VIDEO_TRAINING
+    from train_utils import (set_all_seeds, load_video_pairs, video_observations,
+                            video_all_codes, video_matching_loss, video_pair_losses)
 
-DATA_PATH = VIDEO_TRAINING["DATA_PATH"]
-DEFAULT_DATA_PATHS = VIDEO_TRAINING.get("DATA_PATHS", [DATA_PATH])
-FORWARD_CARRIED_LOSS_WEIGHT = VIDEO_TRAINING["FORWARD_CARRIED_LOSS_WEIGHT"]
-PRIOR_WEIGHT = VIDEO_TRAINING["PRIOR_WEIGHT"]
-VQ_LOSS_WEIGHT = VIDEO_TRAINING["VQ_LOSS_WEIGHT"]
-AUX_ACTION_WEIGHT = VIDEO_TRAINING["AUX_ACTION_WEIGHT"]
-CONSISTENCY_WEIGHT = VIDEO_TRAINING["CONSISTENCY_WEIGHT"]
 
-def train_stage1(args):
-    if getattr(args, "data_paths", None):
-        data_paths = args.data_paths
-    elif getattr(args, "data_path", None):
-        data_paths = [args.data_path]
-    else:
-        data_paths = DEFAULT_DATA_PATHS
-    print(f"Training data file(s): {data_paths}")
+def train_video(config, root, device, smoke=False):
+    root.mkdir(parents=True, exist_ok=False)
+    set_all_seeds(config["SEED"])
+    model = WorldModel((6, 6, 3), config["NUM_LATENT_MODES"]).to(device)
+    model.decoder_shared[2].p = 0.
+    for name, parameter in model.named_parameters():
+        parameter.requires_grad_(not name.startswith(("finetune_", "vq_encoder_net")))
+    parameters = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.Adam(parameters, lr=config["LR"])
 
-    train_loader, test_loader, obs_shape = get_dataloaders(
-        data_paths,
-        batch_size=args.batch_size,
-        split_ratio=0.5,
-        seed=42,
-    )
-    os.makedirs(args.save_dir, exist_ok=True)
-    
-    model = WorldModel(observation_shape=obs_shape, num_actions=7).to(DEVICE)
-    if getattr(args, "pretrained_path", None) is not None and os.path.isfile(args.pretrained_path):
-        model = load_model_checkpoint(model, args.pretrained_path, DEVICE, strict=False)
-        print("Pretrained weights loaded successfully")
-    else:
-        print("No pretrained weights provided")
-    
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = create_warmup_cosine_scheduler(optimizer, args.warmup_epochs, args.epochs)
+    def lr_factor(epoch):
+        warmup = config["WARMUP_EPOCHS"]
+        if epoch < warmup:
+            return .1 + .9 * epoch / warmup
+        progress = min(1., (epoch - warmup) / max(1, config["EPOCHS"] - warmup))
+        return .05 + .95 * .5 * (1 + math.cos(math.pi * progress))
 
-    log_path = os.path.join(args.save_dir, 'training_log_stage1.csv')
-    with open(log_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['epoch', 'train_loss', 'test_loss'])
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_factor)
+    sampler = torch.Generator().manual_seed(config["SEED"] + 100000)
+    groups = load_video_pairs(config["DATA_PATH"], device, role="groups")
+    pairs = load_video_pairs(config["DATA_PATH"], device, role="policy")
+    record = dict(config=config, smoke=smoke, architecture="original_WorldModel",
+                  supervision="transition-only; no action labels", training_mode="single_stage_warmup",
+                  data_sha256=hashlib.sha256(Path(config["DATA_PATH"]).read_bytes()).hexdigest())
+    (root / "config.json").write_text(json.dumps(record, indent=2) + "\n")
+    gb, pb = config["GROUP_BATCH_SIZE"], config["PAIR_BATCH_SIZE"]
 
-    print(f"Starting Stage 1 Training...")
-    
-    if args.use_wandb:
-        wandb.init(
-            project=args.wandb_project if hasattr(args, 'wandb_project') else "world-model-training",
-            name=args.wandb_name if hasattr(args, 'wandb_name') else f"pretrained_video_model",
-            config={
-                'forward_carried_loss_weight': FORWARD_CARRIED_LOSS_WEIGHT,
-                'prior_weight': PRIOR_WEIGHT,
-                'vq_loss_weight': VQ_LOSS_WEIGHT,
-                'aux_action_weight': AUX_ACTION_WEIGHT,
-                'consistency_weight': CONSISTENCY_WEIGHT,
-                'batch_size': args.batch_size,
-                'lr': args.lr,
-                'epochs': args.epochs,
-                'eval_freq': args.eval_freq,
-            }
-        )
-    
-    best_test_loss = float('inf')
-    criterion_ce = nn.CrossEntropyLoss(reduction='none')
-    criterion_mse = nn.MSELoss()
-
-    for epoch in tqdm(range(args.epochs), desc="Training"):
+    for epoch in range(1, config["EPOCHS"] + 1):
         model.train()
-        train_loss_total = 0.0
-        
-        for batch_idx, batch in enumerate(train_loader):
-            inputs, _ = prepare_batch_inputs(batch, DEVICE)
-
-            optimizer.zero_grad()
-            next_inputs = {k: v[1] for k, v in inputs.items()}
-            pred_out = model(inputs, next_obs_inputs=next_inputs, mode='posterior', gt_actions=batch['action'].to(DEVICE))
-            
-            loss, _ = compute_loss_vp(
-                pred_out,
-                inputs,
-                criterion_ce,
-                criterion_mse,
-                aux_action_weight=AUX_ACTION_WEIGHT,
-                consistency_weight=CONSISTENCY_WEIGHT,
-                carried_weight=FORWARD_CARRIED_LOSS_WEIGHT,
-                vq_loss_weight=VQ_LOSS_WEIGHT,
-                prior_weight=PRIOR_WEIGHT,
-            )
-            
+        start, end = config["PRIOR_WARMUP_START"], config["PRIOR_WARMUP_END"]
+        scale = min(1., max(0., (epoch - start) / (end - start)))
+        statistics = []
+        lr = optimizer.param_groups[0]["lr"]
+        for _ in range(config["STEPS_PER_EPOCH"]):
+            gi = torch.randint(len(groups[0]), (gb,), generator=sampler).to(device)
+            pi = torch.randint(len(pairs["states"]), (pb,), generator=sampler).to(device)
+            permutation = torch.rand(gb, model.num_actions, generator=sampler).argsort(1).to(device)
+            states, carried, targets = [v[gi] for v in groups]
+            targets = targets.gather(1, permutation[:, :, None].expand(-1, -1, 110))
+            prediction = video_all_codes(model, video_observations(states, carried))
+            matching = video_matching_loss(prediction, states, targets, config)
+            batch = {k: v[pi] for k, v in pairs.items()}
+            prior, reconstruction, exact = video_pair_losses(model, batch, config)
+            loss = matching + scale * (prior + config["PAIR_WEIGHT"] * reconstruction)
+            if not torch.isfinite(loss):
+                raise FloatingPointError(f"Nonfinite loss at epoch {epoch}")
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(parameters, config["GRAD_CLIP"])
             optimizer.step()
-            
-            train_loss_total += loss.item()
-        
-        avg_train_loss = train_loss_total / len(train_loader)
+            statistics.append([float(v.detach()) for v in (loss, matching, prior, reconstruction, exact)])
         scheduler.step()
-        
-        if args.use_wandb:
-            wandb.log({
-                'epoch': epoch + 1,
-                'train/loss': avg_train_loss,
-                'train/learning_rate': optimizer.param_groups[0]['lr'],
-            }, step=epoch + 1)
-        
-        if (epoch + 1) % args.eval_freq == 0:
-            eval_metrics = evaluate(
-                model,
-                test_loader,
-                device=DEVICE,
-                forward_carried_loss_weight=FORWARD_CARRIED_LOSS_WEIGHT,
-                use_random_base_model=False,
-                is_round_0=False,
-            )
-            test_loss = eval_metrics['mse']
-            print(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {avg_train_loss:.4f} | Test Loss: {test_loss:.4f}")
-            
-            with open(log_path, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([epoch + 1, avg_train_loss, test_loss])
-            
-            if args.use_wandb:
-                wandb.log({'test/loss': test_loss}, step=epoch + 1)
-                
-            if test_loss < best_test_loss:
-                best_test_loss = test_loss
-                save_path = os.path.join(args.save_dir, f'pretrained_video_model.pth')
-                torch.save(model.state_dict(), save_path)
-                print(f"Best model saved to {save_path}")
+        stats = np.mean(statistics, axis=0)
+        row = dict(epoch=epoch, step=epoch * config["STEPS_PER_EPOCH"], loss=float(stats[0]),
+                   matching=float(stats[1]), prior=float(stats[2]), pair_reconstruction=float(stats[3]),
+                   exact_pair_fraction=float(stats[4]), prior_weight=scale, lr=lr)
+        with (root / "training.jsonl").open("a") as log:
+            log.write(json.dumps(row) + "\n")
+        print(json.dumps(row), flush=True)
+        if epoch == 1 or epoch % config["SAVE_FREQ"] == 0 or epoch == config["EPOCHS"]:
+            nr = np.random.get_state()
+            checkpoint = root / f"epoch{epoch:03d}.pth"
+            torch.save(dict(model_state_dict=model.state_dict(), **record, epoch=epoch,
+                            total_steps=row["step"],
+                            optimizer_state_dict=optimizer.state_dict(), scheduler_state_dict=scheduler.state_dict(),
+                            sampler_state=sampler.get_state(), resume_supported=False,
+                            rng_state=dict(python=random.getstate(), numpy=(nr[0], nr[1].tolist(), *nr[2:]),
+                                           torch=torch.get_rng_state(),
+                                           cuda=torch.cuda.get_rng_state_all() if device.type == "cuda" else [])), checkpoint)
+    # Same 40 video tensors as the legacy format; initialize 8 action adapters separately.
+    video_state = {k: v.detach().cpu() for k, v in model.state_dict().items() if not k.startswith("finetune_")}
+    torch.save(dict(model_state_dict=video_state, **record, training_checkpoint=str(checkpoint)),
+               root / "video_actionfree_original_arch.pth")
+    return checkpoint
 
-    if args.use_wandb:
-        wandb.finish()
-    
-    print("Stage 1 Training Complete.")
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--save-dir", type=Path)
+    parser.add_argument("--device", default=str(DEVICE))
+    parser.add_argument("--smoke", action="store_true", help="Two tiny epochs exercising both loss weights 0 and 1.")
+    args = parser.parse_args()
+    config = copy.deepcopy(VIDEO_TRAINING)
+    if args.smoke:
+        config.update(EPOCHS=2, STEPS_PER_EPOCH=2, GROUP_BATCH_SIZE=4, PAIR_BATCH_SIZE=4,
+                      PRIOR_WARMUP_START=1, PRIOR_WARMUP_END=2)
+    root = args.save_dir or Path(config["SAVE_DIR"] + ("_smoke" if args.smoke else ""))
+    config["SAVE_DIR"] = str(root)
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    train_video(config, root, torch.device(args.device), args.smoke)
+    print(f"Finished: {root}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--data_path",
-        type=str,
-        default=None,
-        help="Single .npz path (overrides default merged DATA_PATHS if set without --data_paths)",
-    )
-    parser.add_argument(
-        "--data_paths",
-        nargs="+",
-        default=None,
-        help="One or more .npz paths to merge",
-    )
-    parser.add_argument(
-        "--pretrained_path",
-        type=str,
-        default=None,
-        help="Optional checkpoint to initialize weights before stage-1 training",
-    )
-    parser.add_argument("--save_dir", type=str, default="checkpoints_stage1", help="Directory to save models/logs")
-    parser.add_argument("--epochs", type=int, default=250)
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--warmup_epochs", type=int, default=10, help="Number of warmup epochs for learning rate scheduling")
-    parser.add_argument("--eval_freq", type=int, default=10)
-    parser.add_argument("--use_wandb", action='store_true', help="Use Weights & Biases for logging")
-    parser.add_argument("--wandb_project", type=str, default="world-model-training", help="WandB project name")
-    parser.add_argument("--wandb_name", type=str, default=None, help="WandB run name")
-    
-    args = parser.parse_args()
-    train_stage1(args)
+    main()

@@ -20,20 +20,37 @@ SEED = 42
 NUM_ACTIONS = 7
 
 # ============================================================================
-# Video Model Training Configuration (train_vp.py)
+# Video Model Training
 # ============================================================================
+
+VIDEO_DATA_DIR = os.environ.get(
+    "VIDEO_ACTIONFREE_DATA_DIR", os.path.join(MINIGRID_DIR, "data")
+)
 VIDEO_TRAINING = {
-    "DATA_PATH": os.path.join(
-        MINIGRID_DIR,
-        "data",
-        "MiniGrid-Empty-Interact-6x6-o3-v0_video_pretraing_deposit.npz"
-    ),
+    "DATA_PATH": os.path.join(VIDEO_DATA_DIR, "MiniGrid-Empty-Interact-6x6-o3-v0_video_pretraing.npz"),
+    "SEED": 601,
+    "NUM_LATENT_MODES": 7,  # Anonymous codes, not actions.
+    "EPOCHS": 300,
+    "STEPS_PER_EPOCH": 128,
+    "GROUP_BATCH_SIZE": 48,
+    "PAIR_BATCH_SIZE": 75,
+    "LR": 1e-3,
+    "WARMUP_EPOCHS": 10,  # Learning-rate warm-up; continuous cosine to 0.05x.
+    "PRIOR_WARMUP_START": 20,  # Prior + pair reconstruction: weight 0 until epoch20.
+    "PRIOR_WARMUP_END": 50,  # Linear ramp to weight 1 at epoch50.
+    "CHANGED_PIXEL_WEIGHT": 5.0,
     "FORWARD_CARRIED_LOSS_WEIGHT": 10.0,
-    "PRIOR_WEIGHT": 5.0,
-    "VQ_LOSS_WEIGHT": 0,
-    "AUX_ACTION_WEIGHT": 0,
     "CONSISTENCY_WEIGHT": 2.0,
+    "PRIOR_TEMPERATURE": 0.5,
+    "UNMATCHED_WEIGHT": 0.1,
+    "PAIR_WEIGHT": 0.5,
+    "GRAD_CLIP": 10.0,
+    "SAVE_FREQ": 20,
+    "SAVE_DIR": os.path.join(MINIGRID_DIR, "checkpoints", "video_model"),
 }
+# Fresh model, one Adam optimizer throughout. Original carried regression head.
+# Dropout0; posterior encoder and downstream action adapters frozen/unused.
+# Reconstruction directly trains latent codes; no true-action CE or VQ objective.
 
 # ============================================================================
 # World Model Fine-tuning Configuration (train_wm.py)
